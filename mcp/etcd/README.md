@@ -133,24 +133,39 @@ To view the interactive diagram:
 
 ## Directory Structure
 
+## Directory Structure
+
+The ETCD Analyzer follows a modular architecture with components organized under the `etcd` namespace for multi-cluster support and extensibility.
+
 ```
 etcd-analyzer/
 │
-├── analysis/                          # AI-powered analysis modules
-│   ├── etcd_analyzer_performance_deepdrive.py
-│   │   └── Comprehensive multi-subsystem performance analysis
-│   ├── performance_analysis_report.py
-│   │   └── Report generation with insights and recommendations
-│   └── analysis_utility.py
-│       └── Shared utilities for analysis (latency, summaries)
+├── analysis/etcd/                     # AI-powered analysis modules
+│   └── etcd/                          # ETCD-specific analysis modules
+│       ├── etcd_analyzer_performance_deepdrive.py
+│       │   └── Comprehensive multi-subsystem performance analysis
+│       ├── performance_analysis_report.py
+│       │   └── Report generation with insights and recommendations
+│       └── analysis_utility.py
+│           └── Shared utilities for analysis (latency, summaries)
 │
 ├── config/                            # Configuration management
-│   ├── etcd_config.py
-│   │   └── Configuration loader, validator, environment handling
-│   └── metrics-etcd.yml
-│       └── Metric definitions, PromQL queries, thresholds
+│   ├── metrics_config_reader.py
+│   │   └── Unified metrics configuration loader and validator
+│   ├── metrics-etcd.yml
+│   │   └── ETCD-specific metrics: WAL fsync, backend commit, proposals
+│   ├── metrics-disk.yml
+│   │   └── Disk I/O metrics: throughput, IOPS, device statistics
+│   ├── metrics-net.yml
+│   │   └── Network metrics: bandwidth, latency, packet statistics
+│   ├── metrics-node.yml
+│   │   └── Node resource metrics: CPU, memory, cgroup usage
+│   ├── test_metrics_loading.py
+│   │   └── Unit tests for metrics configuration loading
+│   └── README.md
+│       └── Configuration documentation and usage guide
 │
-├── elt/                               # Extract-Load-Transform pipeline
+├── elt/etcd/                          # Extract-Load-Transform pipeline
 │   ├── etcd_analyzer_elt_backend_commit.py
 │   ├── etcd_analyzer_elt_bottleneck.py
 │   ├── etcd_analyzer_elt_cluster_info.py
@@ -170,68 +185,129 @@ etcd-analyzer/
 │   └── etcd_analyzer_elt_utility.py
 │       └── Shared ELT utilities
 │
+├── mcp/etcd/                          # MCP server and agents
+│   ├── etcd_analyzer_mcp_server.py
+│   │   └── FastMCP server with 15+ performance tools
+│   ├── etcd_analyzer_client_chat.py
+│   │   └── FastAPI app with LangGraph agent and streaming
+│   ├── etcd_analyzer_mcp_agent_report.py
+│   │   └── LangGraph StateGraph for comprehensive reporting
+│   ├── etcd_analyzer_mcp_agent_stor2db.py
+│   │   └── LangGraph StateGraph for DuckDB ELT
+│   ├── etcd_analyzer_command.sh
+│   │   └── Management script (start/stop/status/logs/client)
+│   ├── etcd_analyzer_cluster.duckdb
+│   │   └── DuckDB database file (created at runtime)
+│   ├── exports/                       # Report exports directory
+│   ├── logs/                          # Application logs
+│   └── storage/etcd/                  # DuckDB storage modules
+│       ├── etcd_analyzer_stor_backend_commit.py
+│       ├── etcd_analyzer_stor_cluster_info.py
+│       ├── etcd_analyzer_stor_compact_defrag.py
+│       ├── etcd_analyzer_stor_disk_io.py
+│       ├── etcd_analyzer_stor_disk_wal_fsync.py
+│       ├── etcd_analyzer_stor_general_info.py
+│       ├── etcd_analyzer_stor_network_io.py
+│       │   └── Per-metric storage modules with schema management
+│       └── etcd_analyzer_stor_utility.py
+│           └── Storage utilities, time range handling
+│
 ├── ocauth/                            # OpenShift authentication
-│   └── ocp_auth.py
+│   └── openshift_auth.py
 │       └── K8s/OCP authentication, token management, API clients
 │
-├── storage/                           # DuckDB persistence layer
-│   ├── etcd_analyzer_stor_backend_commit.py
-│   ├── etcd_analyzer_stor_cluster_info.py
-│   ├── etcd_analyzer_stor_compact_defrag.py
-│   ├── etcd_analyzer_stor_disk_io.py
-│   ├── etcd_analyzer_stor_disk_wal_fsync.py
-│   ├── etcd_analyzer_stor_general_info.py
-│   ├── etcd_analyzer_stor_network_io.py
-│   │   └── Per-metric storage modules with schema management
-│   └── etcd_analyzer_stor_utility.py
-│       └── Storage utilities, time range handling
+├── tools/                             # Metric collection tools (category-based)
+│   ├── disk/                          # Disk I/O collectors
+│   │   └── disk_io.py
+│   │       └── Disk throughput, IOPS, device statistics
+│   │
+│   ├── etcd/                          # ETCD-specific collectors
+│   │   ├── etcd_cluster_status.py
+│   │   │   └── Cluster health, member list, leadership info
+│   │   ├── etcd_general_info.py
+│   │   │   └── CPU, memory, proposals, leadership metrics
+│   │   ├── etcd_disk_wal_fsync.py
+│   │   │   └── WAL fsync latency and performance
+│   │   ├── etcd_disk_backend_commit.py
+│   │   │   └── Backend commit operation performance
+│   │   ├── etcd_disk_compact_defrag.py
+│   │   │   └── Compaction and defragmentation metrics
+│   │   └── etcd_network_io.py
+│   │       └── Network bandwidth, latency, packet statistics
+│   │
+│   ├── net/                           # Network collectors
+│   │   ├── network_io.py
+│   │   │   └── Network I/O bandwidth and utilization
+│   │   ├── network_l1.py
+│   │   │   └── Layer 1 network statistics
+│   │   ├── network_netstat4tcp.py
+│   │   │   └── TCP netstat metrics
+│   │   ├── network_netstat4udp.py
+│   │   │   └── UDP netstat metrics
+│   │   ├── network_socket4ip.py
+│   │   │   └── IP socket statistics
+│   │   ├── network_socket4tcp.py
+│   │   │   └── TCP socket statistics
+│   │   ├── network_socket4udp.py
+│   │   │   └── UDP socket statistics
+│   │   ├── network_socket4mem.py
+│   │   │   └── Network memory statistics
+│   │   └── network_socket4softnet.py
+│   │       └── Softnet statistics
+│   │
+│   ├── node/                          # Node resource collectors
+│   │   └── node_usage.py
+│   │       └── Master node CPU, memory, cgroup metrics
+│   │
+│   ├── ocp/                           # OpenShift/Kubernetes collectors
+│   │   └── cluster_info.py
+│   │       └── Cluster information, node inventory
+│   │
+│   ├── ovnk/                          # OVN-Kubernetes collectors
+│   │   └── (Future: OVN-Kubernetes networking metrics)
+│   │
+│   └── utils/                         # Shared utilities
+│       ├── promql_basequery.py
+│       │   └── Base Prometheus query utilities
+│       └── promql_utility.py
+│           └── PromQL helper functions and formatters
 │
-├── tools/                             # Metric collection tools
-│   ├── etcd_cluster_status.py
-│   │   └── Cluster health, member list, leadership info
-│   ├── etcd_general_info.py
-│   │   └── CPU, memory, proposals, leadership metrics
-│   ├── etcd_disk_wal_fsync.py
-│   │   └── WAL fsync latency and performance
-│   ├── etcd_disk_backend_commit.py
-│   │   └── Backend commit operation performance
-│   ├── etcd_disk_io.py
-│   │   └── Disk throughput, IOPS, device statistics
-│   ├── etcd_disk_compact_defrag.py
-│   │   └── Compaction and defragmentation metrics
-│   ├── etcd_network_io.py
-│   │   └── Network bandwidth, latency, packet statistics
-│   ├── etcd_node_usage.py
-│   │   └── Master node CPU, memory, cgroup metrics
-│   ├── ocp_cluster_info.py
-│   │   └── Cluster information, node inventory
-│   ├── ocp_promql_basequery.py
-│   │   └── Base Prometheus query utilities
-│   └── etcd_tools_utility.py
-│       └── Shared tool utilities
-│
-├── webroot/                           # Web interface
+├── webroot/etcd/                      # Web interface
 │   └── etcd_analyzer_mcp_llm.html
 │       └── Interactive web UI for chat interface
-│
-├── etcd_analyzer_command.sh           # Management script
-│   └── Start/stop/status/logs/client commands
-│
-├── etcd_analyzer_mcp_server.py        # MCP server implementation
-│   └── FastMCP server with 15+ performance tools
-│
-├── etcd_analyzer_client_chat.py       # AI chatbot client
-│   └── FastAPI app with LangGraph agent and streaming
-│
-├── etcd_analyzer_mcp_agent_report.py  # Performance report agent
-│   └── LangGraph StateGraph for comprehensive reporting
-│
-├── etcd_analyzer_mcp_agent_stor2db.py # Storage pipeline agent
-│   └── LangGraph StateGraph for DuckDB ELT
 │
 ├── pyproject.toml                     # Python project configuration
 └── README.md                          # This file
 ```
+
+### Directory Organization Principles
+
+The new structure follows these principles:
+
+1. **Namespace Isolation**: All ETCD-specific components are under `etcd/` subdirectories
+2. **Modular Design**: Easy to add support for other distributed systems (e.g., `ceph/`, `cassandra/`)
+3. **Category-Based Tools**: Collectors organized by metric category (disk, net, node, etcd, ocp, ovnk)
+4. **Clear Separation**: MCP layer, tools, analysis, and storage are cleanly separated
+5. **Centralized Configuration**: Unified metrics configuration system in `config/` with category-based YAML files
+6. **Runtime Artifacts**: Logs, exports, and databases in dedicated directories
+
+### Tools Architecture
+
+The `tools/` directory follows a category-based organization matching the metrics configuration structure:
+
+- **disk/**: Disk I/O performance collectors
+- **etcd/**: ETCD-specific metrics (WAL, backend, proposals, leadership)
+- **net/**: Network performance collectors (L1, TCP/UDP, sockets, netstat)
+- **node/**: Node resource utilization collectors
+- **ocp/**: OpenShift/Kubernetes cluster collectors
+- **ovnk/**: OVN-Kubernetes networking collectors (extensible)
+- **utils/**: Shared utilities (PromQL queries, formatters)
+
+This structure enables:
+- ✅ Easy discovery of collectors by category
+- ✅ Parallel development of different metric categories
+- ✅ Clear separation of concerns
+- ✅ Extensibility for new platforms (OVN-K, storage, etc.)
 
 ## Features
 
