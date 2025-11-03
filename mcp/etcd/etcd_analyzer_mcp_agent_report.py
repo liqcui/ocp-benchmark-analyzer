@@ -77,7 +77,7 @@ class AgentState(TypedDict):
 class etcdAnalyzerMCPAgent:
     """AI agent for etcd performance analysis using MCP server integration"""
     
-    def __init__(self, mcp_server_url: str = "http://localhost:8000"):
+    def __init__(self, mcp_server_url: str = "http://localhost:8001"):
         self.utility = etcdAnalyzerUtility()
         self.report_analyzer = etcdReportAnalyzer()
         self.timezone = pytz.UTC
