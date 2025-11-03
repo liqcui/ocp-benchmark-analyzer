@@ -21,12 +21,14 @@ import requests
 class OpenShiftAuth:
     """OpenShift authentication and service discovery"""
     
-    def __init__(self):
+    def __init__(self, kubeconfig_path: Optional[str] = None):
         self.k8s_client = None
         self.prometheus_url = None
         self.token = None
         self.ca_cert_path = None
         self.logger = logging.getLogger(__name__)
+        # Optional kubeconfig path for explicit configuration
+        self.kubeconfig_path: Optional[str] = kubeconfig_path
         # Store full discovery details for building fallbacks
         self.prometheus_info: Optional[Dict[str, Any]] = None
         # K8s API TLS verification flag (env overridable)
@@ -43,8 +45,12 @@ class OpenShiftAuth:
             if original_ca_bundle:
                 self.logger.info(f"Temporarily cleared REQUESTS_CA_BUNDLE: {original_ca_bundle}")
             
-            # Load kubeconfig
-            config.load_kube_config()
+            # Load kubeconfig (use explicit path when provided)
+            if self.kubeconfig_path:
+                self.logger.info(f"Loading kubeconfig from path: {self.kubeconfig_path}")
+                config.load_kube_config(config_file=self.kubeconfig_path)
+            else:
+                config.load_kube_config()
 
             # Respect env override for API server TLS verification
             def _env_bool(name: str, default: Optional[bool] = None) -> Optional[bool]:
@@ -124,6 +130,11 @@ class OpenShiftAuth:
         except Exception as e:
             self.logger.error(f"Failed to initialize OCP authentication: {e}")
             return False
+
+    @property
+    def kube_client(self):
+        """Backward compatible alias for k8s_client."""
+        return self.k8s_client
 
     def _ensure_k8s_api_connectivity(self) -> None:
         """Probe the Kubernetes API and auto-recover from common SSL/PEM issues.
