@@ -11,6 +11,7 @@ import shlex
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 import asyncio
+import ssl
 
 # Suppress urllib3 SSL warnings for self-signed certificates
 import urllib3
@@ -110,8 +111,26 @@ class OpenShiftAuth:
 
             self.k8s_client = client.ApiClient(configuration=k8s_conf)
             
-            # Proactively probe API to catch SSL/CA issues and auto-fallback
-            self._ensure_k8s_api_connectivity()
+            # If CA file appears invalid and verification not explicitly forced, disable TLS early
+            try:
+                ca_from_conf = getattr(k8s_conf, 'ssl_ca_cert', None)
+                if ca_from_conf and self.k8s_verify_ssl is not True:
+                    if not self._is_ca_file_valid(ca_from_conf):
+                        self.logger.warning(
+                            f"Detected invalid CA cert at {ca_from_conf}; disabling TLS verification to avoid PEM errors"
+                        )
+                        k8s_conf_fallback = client.Configuration.get_default_copy()
+                        k8s_conf_fallback.verify_ssl = False
+                        k8s_conf_fallback.assert_hostname = False
+                        k8s_conf_fallback.ssl_ca_cert = None
+                        self.k8s_client = client.ApiClient(configuration=k8s_conf_fallback)
+                        self.k8s_verify_ssl = False
+                
+                # Proactively probe API to catch SSL/CA issues and auto-fallback
+                self._ensure_k8s_api_connectivity()
+            except Exception:
+                # _ensure_k8s_api_connectivity will log and handle fallbacks
+                raise
             
             # Get authentication details
             await self._get_auth_details()
@@ -140,6 +159,21 @@ class OpenShiftAuth:
     def prometheus_token(self) -> Optional[str]:
         """Backward compatible alias commonly used by collectors."""
         return self.token
+
+    def _is_ca_file_valid(self, ca_path: str) -> bool:
+        """Validate a CA bundle by attempting to load it with ssl.
+
+        Returns False if the file cannot be loaded as a trust store.
+        """
+        try:
+            if not os.path.isfile(ca_path):
+                return False
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ctx.load_verify_locations(cafile=ca_path)
+            return True
+        except Exception as e:
+            self.logger.debug(f"CA validation failed for {ca_path}: {e}")
+            return False
 
     def _ensure_k8s_api_connectivity(self) -> None:
         """Probe the Kubernetes API and auto-recover from common SSL/PEM issues.
