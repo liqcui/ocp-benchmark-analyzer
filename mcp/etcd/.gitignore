@@ -1,0 +1,14 @@
+logs
+build/
+venv
+.venv
+.env
+__pycache__
+*.duckdb
+etcd_analyzer.duckdb
+ocp_benchmark_mcp.egg-info
+*.log
+DATA/
+etcd-tools/
+comp.txt
+keysonly.txt

@@ -1,0 +1,144 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ocp-benchmark-mcp"
+version = "1.0.0"
+description = "OpenShift OVN-Kubernetes Benchmark MCP Server"
+authors = [
+    {name = "OCP Benchmark Team", email = "team@example.com"}
+]
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+
+dependencies = [
+    # Core FastAPI and async dependencies
+    "asyncio>=3.4.1",
+    "fastapi>=0.115.7",
+    "uvicorn[standard]>=0.32.0",
+    "wsproto>=1.2.0",
+    "python-multipart>=0.0.9",
+    
+    # MCP Server dependencies
+    "fastmcp>=1.12.4",
+    
+    # LangGraph and LangChain for advanced workflows
+    "langgraph>=0.3.0",
+    "langchain>=0.3.0",
+    "langchain-core>=0.3.0",
+    "langchain-openai>=0.3.0",
+    "langchain-community>=0.2.0",
+    
+    # Data validation and serialization
+    "pydantic>=2.10.0",
+    "pydantic-core>=2.14.0",
+    
+    # HTTP and async client libraries
+    "httpx>=0.27.0",
+    "aiohttp>=3.10.0",
+    "requests>=2.32.0",
+    "aiofiles>=23.2.0",
+    
+    # Kubernetes and OpenShift
+    "kubernetes>=30.0.0",
+    "openshift-client>=1.0.0",
+    
+    # Monitoring and metrics
+    "prometheus-client>=0.20.0",
+    
+    # Database
+    "psycopg2-binary>=2.9.7",
+    "sqlalchemy>=2.0.0",
+    "duckdb>=1.1.0",
+    
+    # Data processing
+    "pandas>=2.2.0",
+    "numpy>=1.24.0",
+    
+    # Export formats
+    "openpyxl>=3.1.0",
+    "reportlab>=4.2.0",
+    
+    # Visualization
+    "matplotlib>=3.9.0",
+    "seaborn>=0.13.0",
+    
+    # Configuration and parsing
+    "pyyaml>=6.0.2",
+    "jinja2>=3.1.0",
+    "python-dotenv>=1.0.0",
+    
+    # Time and timezone handling
+    "python-dateutil>=2.9.0",
+    "pytz>=2023.3",
+    
+    # JSON and data processing
+    "orjson>=3.9.0",
+    "ujson>=5.8.0",
+    
+    # Logging and configuration
+    "structlog>=23.2.0",
+    
+    # AI and LLM
+    "openai>=1.0.0",
+
+    #tabulate
+    "tabulate>=0.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-httpx>=0.27.0",
+    "black>=24.0.0",
+    "isort>=5.12.0",
+    "flake8>=7.0.0",
+    "mypy>=1.11.0",
+]
+
+# Optional LLM providers
+llm-providers = [
+    "langchain-anthropic>=0.2.0",
+    "langchain-google-genai>=2.0.0",
+    "langchain-huggingface>=0.1.0",
+]
+
+[project.scripts]
+ocp-benchmark-mcp = "ocp_benchmark_mcp.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["*"]
+
+[tool.black]
+line-length = 88
+target-version = ['py39']
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"

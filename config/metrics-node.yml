@@ -1,0 +1,39 @@
+metrics:
+  #Node Usage
+  - name: node_cpu_usage
+    title: "node_cpu_usage"
+    expr: 'sum by (instance, mode)(irate(node_cpu_seconds_total{instance=~"$node_name",job=~".*"}[5m])) * 100'
+    unit: percent
+    description: "cpu usage per nodes and mode"
+    category: node_usage
+
+  - name: node_memory_used
+    title: "node_memory_used"
+    expr: '(node_memory_MemTotal_bytes{instance=~"$node_name"} - (node_memory_MemFree_bytes{instance=~"$node_name"} + node_memory_Buffers_bytes{instance=~"$node_name"} +  node_memory_Cached_bytes{instance=~"$node_name"}))'
+    unit: bytes
+    description: "memory used usage per nodes and mode"
+    category: node_usage
+
+  - name: node_memory_cache_buffer
+    title: "node_memory_cache_buffer"
+    expr: 'node_memory_Cached_bytes{instance=~"$node_name"} + node_memory_Buffers_bytes{instance=~"$node_name"}'
+    unit: percent
+    description: "memory cache buffer usage per nodes"
+    category: node_usage
+    
+  - name: cgroup_cpu_usage
+    title: "cgroup_cpu_usage"
+    expr: 'sum by (id) ( rate(container_cpu_usage_seconds_total{ job=~".*", id =~"/system.slice|/system.slice/kubelet.service|/system.slice/ovs-vswitchd.service|/system.slice/crio.service|/system.slice/systemd-journald.service|/system.slice/ovsdb-server.service|/system.slice/systemd-udevd.service|/kubepods.slice", node=~"$node_name"}[5m])) * 100'
+    unit: percent
+    description: "cpu usage per nodes and mode"
+    category: node_usage
+
+  - name: cgroup_rss_usage
+    title: "cgroup_rss_usage"
+    expr: 'sum by (id) ( container_memory_rss{ job=~".*", id =~"/system.slice|/system.slice/kubelet.service|/system.slice/ovs-vswitchd.service|/system.slice/crio.service|/system.slice/systemd-journald.service|/system.slice/ovsdb-server.service|/system.slice/systemd-udevd.service|/kubepods.slice", node=~"$node_name"})'
+    unit: percent
+    description: "memory cache buffer usage per nodes"
+    category: node_usage
+
+
+

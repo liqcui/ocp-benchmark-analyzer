@@ -1,0 +1,51 @@
+
+metrics:  
+  #disk_io
+  - name: disk_io_container_disk_writes
+    title: "disk_io_container_disk_writess"
+    expr: 'rate(container_fs_writes_bytes_total{namespace="openshift-etcd",device!~".+dm.+"}[2m])'
+    unit: bytes_per_second
+    category: disk_io
+
+  - name: disk_io_node_disk_throughput_read
+    title: "disk_io_node_disk_throughput_read"
+    expr: 'rate(node_disk_read_bytes_total{device=~".*",instance=~".*"}[2m])'
+    unit: bytes_per_second
+    category: disk_io
+
+  - name: disk_io_node_disk_throughput_write
+    title: "disk_io_node_disk_throughput_write"
+    expr: 'rate(node_disk_written_bytes_total{device=~".*",instance=~".*"}[2m])'
+    unit: bytes_per_second
+    category: disk_io
+
+  - name: disk_io_node_disk_iops_read
+    title: "disk_io_node_disk_iops_read"
+    expr: 'rate(node_disk_reads_completed_total{device=~".*",instance=~".*"}[2m])'
+    unit: operations_per_second
+    category: disk_io
+
+  - name: disk_io_node_disk_iops_write
+    title: "disk_io_node_disk_iops_write"
+    expr: 'rate(node_disk_writes_completed_total{device=~".*",instance=~".*"}[2m])'
+    unit: operations_per_second
+    category: disk_io
+    
+  - name: disk_io_node_disk_read_time_seconds
+    title: "disk_io_node_disk_read_time_seconds"
+    expr: 'rate(node_disk_read_time_seconds_total[5m]) / irate(node_disk_reads_completed_total[5m]) > 0'
+    unit: seconds
+    category: disk_io
+
+  - name: disk_io_node_disk_writes_time_seconds
+    title: "disk_io_node_disk_writes_time_seconds"
+    expr: 'rate(node_disk_write_time_seconds_total[5m])/rate(node_disk_writes_completed_total[5m]) > 0'
+    unit: seconds
+    category: disk_io
+  
+  - name: disk_io_node_disk_io_time_seconds
+    title: "disk_io_node_disk_io_time_seconds"
+    expr: 'rate(node_disk_io_time_seconds_total[5m])'
+    unit: seconds
+    category: disk_io
+  

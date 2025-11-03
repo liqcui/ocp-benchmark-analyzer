@@ -1,0 +1,340 @@
+metrics:
+  # General Information Metrics
+  - name: etcd_pods_cpu_usage
+    title: "etcd_pods_cpu_usage"
+    expr: 'sum(irate(container_cpu_usage_seconds_total{namespace="openshift-etcd", container="etcd",pod=~".*"}[2m])) by (pod) * 100'
+    unit: "percent"
+    category: "general_info"
+    description: "CPU usage percentage for etcd containers"
+
+  - name: cpu_io_utilization_iowait
+    title: "cpu_io_utilization_iowait"
+    expr: 'sum by(instance, mode) (irate(node_cpu_seconds_total{ job=~".*", mode="iowait"}[2m])) * 100'
+    unit: percent
+    category: general_info
+
+  - name: etcd_pods_memory_usage
+    title: "etcd_pods_memory_usage"
+    expr: 'sum(container_memory_working_set_bytes{namespace="openshift-etcd", container="etcd",pod=~".*"}) by (pod) / 1024 / 1024'
+    unit: "MB"
+    category: "general_info"
+    description: "Memory usage in megabytes for etcd containers"
+
+  - name: apiserver_storage_objects_max_top20
+    title: "apiserver_storage_objects_max"
+    expr: 'topk(20,resource:apiserver_storage_objects:max)'
+    unit: count
+    category: general_info
+
+  - name: etcd_db_space_used_percent
+    title: "etcd_db_space_used_percent"
+    expr: '(etcd_mvcc_db_total_size_in_bytes{namespace="openshift-etcd"} / etcd_server_quota_backend_bytes{namespace="openshift-etcd"}) * 100'
+    unit: "percent"
+    category: "general_info"
+    description: "Percentage of database space used"
+
+  - name: etcd_db_physical_size
+    title: "etcd_db_physical_size"
+    expr: 'etcd_mvcc_db_total_size_in_bytes{namespace="openshift-etcd"} / 1024 / 1024'
+    unit: "MB"
+    category: "general_info"
+    description: "Physical size of etcd database in megabytes"
+
+  - name: etcd_db_logical_size
+    title: "etcd_db_logical_size"
+    expr: 'etcd_mvcc_db_total_size_in_use_in_bytes{namespace="openshift-etcd"} / 1024 / 1024'
+    unit: "MB"
+    category: "general_info"
+    description: "Logical size of etcd database in megabytes"
+
+  - name: proposal_failure_rate
+    title: "proposal_failure_rate"
+    expr: 'rate(etcd_server_proposals_failed_total{namespace="openshift-etcd"}[5m])'
+    unit: "per_second"
+    category: "general_info"
+    description: "Rate of failed proposals per second"
+
+  - name: proposal_pending_total
+    title: "proposal_pending_total"
+    expr: 'etcd_server_proposals_pending{namespace="openshift-etcd"}'
+    unit: "count"
+    category: "general_info"
+    description: "Total number of pending proposals"
+
+  - name: proposal_commit_rate
+    title: "proposal_commit_rate"
+    expr: 'rate(etcd_server_proposals_committed_total{namespace="openshift-etcd"}[5m])'
+    unit: "per_second"
+    category: "general_info"
+    description: "Rate of committed proposals per second"
+
+  - name: proposal_apply_rate
+    title: "proposal_apply_rate"
+    expr: 'rate(etcd_server_proposals_applied_total{namespace="openshift-etcd"}[5m])'
+    unit: "per_second"
+    category: "general_info"
+    description: "Rate of applied proposals per second"
+
+  - name: total_proposals_committed
+    title: "total_proposals_committed"
+    expr: 'etcd_server_proposals_committed_total{namespace="openshift-etcd"}'
+    unit: "count"
+    category: "general_info"
+    description: "Total number of committed proposals"
+
+  - name: leader_changes_rate
+    title: "leader_changes_rate"
+    expr: 'rate(etcd_server_leader_changes_seen_total{namespace="openshift-etcd"}[5m])'
+    unit: "per_second"
+    category: "general_info"
+    description: "Rate of leader changes per second"
+
+  - name: etcd_has_leader
+    title: "etcd_has_leader"
+    expr: 'etcd_server_has_leader{namespace="openshift-etcd"}'
+    unit: "boolean"
+    category: "general_info"
+    description: "Whether etcd cluster has a leader (1=yes, 0=no)"
+
+  - name: leader_elections_per_day
+    title: "leader_elections_per_day"
+    expr: 'rate(etcd_server_leader_changes_seen_total{namespace="openshift-etcd"}[24h]) * 86400'
+    unit: "per_day"
+    category: "general_info"
+    description: "Number of leader elections per day"
+
+  - name: etcd_slow_applies
+    title: "etcd_slow_applies"
+    expr: 'delta(etcd_server_slow_apply_total{namespace="openshift-etcd",pod=~"$etcd_pod"}[2m])'
+    unit: "seconds"
+    category: "general_info"
+    description: "slow applies operations"
+
+  - name: etcd_slow_read_indexes
+    title: "etcd_slow_read_indexes"
+    expr: 'delta(etcd_server_slow_read_indexes_total{namespace="openshift-etcd",pod=~"$etcd_pod"}[2m])'
+    unit: "seconds"
+    category: general_info
+
+  - name: etcd_mvcc_put_operations_rate
+    title: "etcd_mvcc_put_operations_rate"
+    expr: 'rate(etcd_mvcc_put_total{namespace="openshift-etcd"}[5m])'
+    unit: "per_second"
+    category: "general_info"
+    description: "Rate of PUT operations per second"
+
+  - name: etcd_mvcc_delete_operations_rate
+    title: "etcd_mvcc_delete_operations_rate"
+    expr: 'rate(etcd_mvcc_delete_total{namespace="openshift-etcd"}[5m])'
+    unit: "per_second"
+    category: "general_info"
+    description: "Rate of DELETE operations per second"
+
+  - name: etcd_network_heartbeat_send_failures
+    title: "etcd_network_heartbeat_send_failures"
+    expr: 'rate(etcd_network_peer_sent_failures_total{namespace="openshift-etcd"}[5m])'
+    unit: "per_second"
+    category: "general_info"
+    description: "Rate of heartbeat send failures per second"
+
+  - name: etcd_server_health_failures
+    title: "etcd_server_health_failures"
+    expr: 'rate(etcd_server_health_failures{namespace="openshift-etcd"}[5m])'
+    unit: "per_second"
+    category: "general_info"
+    description: "Rate of health check failures per second"
+
+  - name: etcd_debugging_mvcc_total_keys
+    title: "etcd_debugging_mvcc_total_keys"
+    expr: 'etcd_debugging_mvcc_keys_total{namespace="openshift-etcd"}'
+    unit: "count"
+    category: "general_info"
+    description: "Total number of keys in etcd"
+
+  - name: vmstat_pgmajfault_total
+    title: "vmstat_pgmajfault_total"
+    expr: 'node_vmstat_pgmajfault'
+    unit: "faults"
+    category: "general_info"
+    description: "Total major page faults on etcd nodes (filtered by master nodes)"   
+
+  - name: vmstat_pgmajfault_rate
+    title: "vmstat_pgmajfault_rate"
+    expr: 'rate(node_vmstat_pgmajfault[1m])'
+    unit: "faults/s"
+    category: "general_info"
+    description: "Rate of major page faults on etcd nodes (filtered by master nodes)"
+
+  # Disk Compact and Defrag Metrics
+  - name: debugging_mvcc_db_compacted_keys
+    title: "debugging_mvcc_db_compacted_keys"
+    expr: 'etcd_debugging_mvcc_db_compaction_keys_total{namespace="openshift-etcd"}'
+    unit: "count"
+    category: "disk_compact_defrag"
+
+  - name: debugging_mvcc_db_compaction_duration_sum_delta
+    title: "debugging_mvcc_db_compaction_duration_sum_delta"
+    expr: 'delta(etcd_debugging_mvcc_db_compaction_total_duration_milliseconds_sum{namespace="openshift-etcd",pod=~".*"}[1m:30s])/2'
+    unit: milliseconds
+    category: disk_compact_defrag
+    description: "Rate of change in compaction duration"
+
+  - name: debugging_mvcc_db_compaction_duration_sum
+    title: "debugging_mvcc_db_compaction_duration_sum"
+    expr: 'etcd_debugging_mvcc_db_compaction_total_duration_milliseconds_sum{namespace="openshift-etcd",pod=~".*"}'
+    unit: milliseconds
+    category: disk_compact_defrag
+    description: "Cumulative compaction duration"
+
+  - name: debugging_snapshot_duration
+    title: "debugging_snapshot_duration"
+    expr: 'sum(rate(etcd_debugging_snap_save_total_duration_seconds_sum{namespace="openshift-etcd"}[2m]))'
+    unit: seconds
+    category: disk_compact_defrag
+
+  - name: disk_backend_defrag_duration_sum_rate
+    title: "disk_backend_defrag_duration_sum_rate"
+    expr: 'delta(etcd_disk_backend_defrag_duration_seconds_sum{namespace="openshift-etcd",pod=~".*"}[1m:30s])/2'
+    unit: seconds
+    category: disk_compact_defrag
+    description: "Rate of change in defragmentation duration"
+
+  - name: disk_backend_defrag_duration_sum
+    title: "disk_backend_defrag_duration_sum"
+    expr: 'etcd_disk_backend_defrag_duration_seconds_sum{namespace="openshift-etcd",pod=~".*"}'
+    unit: seconds
+    category: disk_compact_defrag
+    description: "Cumulative defragmentation duration"
+
+
+   #disk_wal_fsync
+  - name: disk_wal_fsync_seconds_duration_p99
+    title: "disk_wal_fsync_seconds_duration_p99"
+    expr: 'histogram_quantile(0.99, sum(rate(etcd_disk_wal_fsync_duration_seconds_bucket{namespace="openshift-etcd",pod=~".*"}[5m])) by (pod, le))'
+    unit: seconds
+    category: disk_wal_fsync
+
+  - name: disk_wal_fsync_duration_seconds_sum_rate
+    title: "disk_wal_fsync_duration_seconds_sum_rate"
+    expr: 'irate(etcd_disk_wal_fsync_duration_seconds_sum{namespace="openshift-etcd",pod=~".*"}[2m])'
+    unit: seconds
+    category: disk_wal_fsync
+
+  - name: disk_wal_fsync_duration_sum
+    title: "disk_wal_fsync_duration_sum"
+    expr: 'etcd_disk_wal_fsync_duration_seconds_sum{namespace="openshift-etcd",pod=~".*"}'
+    unit: seconds
+    category: disk_wal_fsync
+
+  - name: disk_wal_fsync_duration_seconds_count_rate
+    title: "disk_wal_fsync_duration_seconds_count_rate"
+    expr: 'irate(etcd_disk_wal_fsync_duration_seconds_count{namespace="openshift-etcd",pod=~".*"}[2m])'
+    unit: count
+    category: disk_wal_fsync
+
+  - name: disk_wal_fsync_duration_seconds_count
+    title: "disk_wal_fsync_duration_seconds_count"
+    expr: 'etcd_disk_wal_fsync_duration_seconds_count{namespace="openshift-etcd",pod=~".*"}'
+    unit: count
+    category: disk_wal_fsync
+
+  #disk_backend_commit
+  - name: disk_backend_commit_duration_seconds_p99
+    title: "disk_backend_commit_duration_seconds_p99"
+    expr: 'histogram_quantile(0.99, sum(rate(etcd_disk_backend_commit_duration_seconds_bucket{namespace="openshift-etcd",pod=~".*"}[5m])) by (pod, le))'
+    unit: seconds
+    category: disk_backend_commit
+
+  - name: disk_backend_commit_duration_sum_rate
+    title: "disk_backend_commit_duration_sum_rate"
+    expr: 'irate(etcd_disk_backend_commit_duration_seconds_sum{namespace="openshift-etcd",pod=~".*"}[2m])'
+    unit: seconds
+    category: disk_backend_commit
+
+  - name: disk_backend_commit_duration_sum
+    title: "disk_backend_commit_duration_sum"
+    expr: 'etcd_disk_backend_commit_duration_seconds_sum{namespace="openshift-etcd",pod=~".*"}'
+    unit: seconds
+    category: disk_backend_commit
+
+  - name: disk_backend_commit_duration_count_rate
+    title: "disk_backend_commit_duration_count_rate"
+    expr: 'irate(etcd_disk_backend_commit_duration_seconds_count{namespace="openshift-etcd",pod=~".*"}[2m])'
+    unit: count
+    category: disk_backend_commit
+
+  - name: disk_backend_commit_duration_count
+    title: "disk_backend_commit_duration_count"
+    expr: 'etcd_disk_backend_commit_duration_seconds_count{namespace="openshift-etcd",pod=~".*"}'
+    unit: count
+    category: disk_backend_commit
+
+  #network_io
+  - name: network_io_peer2peer_rtt_latency_p99
+    title: "network-io-peer2peer-rtt-latency-p99"
+    expr: 'histogram_quantile(0.99, rate(etcd_network_peer_round_trip_time_seconds_bucket{namespace="openshift-etcd",pod=~".*"}[2m]))'
+    unit: seconds
+    description: "Peer round-trip time P99 latency"
+    category: network_io
+
+  - name: network_io_container_network_rx
+    title: "network-io-container-network-rx"
+    expr: 'sum(rate(container_network_receive_bytes_total{ namespace=~"openshift-etcd.*"}[2m])) BY (namespace, pod)'
+    unit: bytes_per_second
+    description: "Container network receive bytes per second"
+    category: network_io
+
+  - name: network_io_container_network_tx
+    title: "network_io_container_network_tx"
+    expr: 'sum(rate(container_network_transmit_bytes_total{ namespace=~"openshift-etcd.*"}[2m])) BY (namespace, pod)'
+    unit: bytes_per_second
+    description: "Container network transmit bytes per second"
+    category: network_io
+
+  - name: etcd_network_active_peers  
+    title: "etcd_network_active_peers"
+    expr: 'etcd_network_active_peers'
+    unit: count
+    description: "Number of active peers in the etcd cluster"    
+    category: network_io
+
+  - name: network_io_network_peer_received_bytes
+    title: "network_io_peer_network_traffic_rx"
+    expr: 'rate(etcd_network_peer_received_bytes_total{namespace="openshift-etcd",pod=~".*"}[2m])'
+    unit: bytes_per_second
+    category: network_io
+
+  - name: network_io_network_peer_sent_bytes
+    title: "network_io_peer_network_traffic_tx"
+    expr: 'rate(etcd_network_peer_sent_bytes_total{namespace="openshift-etcd",pod=~".*"}[2m])'
+    unit: bytes_per_second
+    category: network_io
+
+  - name: network_io_etcd_in_c2s_network_client_grpc_received_bytes
+    title: "network_io_etcd_in_c2s_network_client_grpc_received_bytes"
+    expr: 'rate(etcd_network_client_grpc_received_bytes_total{namespace="openshift-etcd",pod=~".*"}[2m])'
+    unit: bytes_per_second
+    description: "gRPC RX bytes per second"
+    category: network_io
+
+  - name: network_io_etcd_out_s2c_network_client_grpc_sent_bytes
+    title: "network_io_etcd_out_s2c_network_client_grpc_sent_bytes"
+    expr: 'rate(etcd_network_client_grpc_sent_bytes_total{namespace="openshift-etcd",pod=~".*"}[2m])'
+    unit: bytes_per_second
+    description: "gRPC RX bytes per second"
+    category: network_io
+
+  - name: network_io_grpc_active_watch_streams
+    title: "network_io_grpc_active_watch_streams"
+    expr: 'sum(grpc_server_started_total{namespace="openshift-etcd",grpc_service="etcdserverpb.Watch",grpc_type="bidi_stream"}) - sum(grpc_server_handled_total{namespace="openshift-etcd",grpc_service="etcdserverpb.Watch",grpc_type="bidi_stream"})'
+    unit: count
+    description: "Number of active watch streams"
+    category: network_io
+
+  - name: network_io_grpc_active_lease_streams
+    title: "network_io_grpc_active_lease_streams"
+    expr: 'sum(grpc_server_started_total{namespace="openshift-etcd",grpc_service="etcdserverpb.Lease",grpc_type="bidi_stream"}) - sum(grpc_server_handled_total{namespace="openshift-etcd",grpc_service="etcdserverpb.Lease",grpc_type="bidi_stream"})'
+    unit: count
+    description: "Number of active lease streams"
+    category: network_io
+    
