@@ -27,8 +27,16 @@ from mcp.client.streamable_http import streamablehttp_client
 from mcp.client.session import ClientSession
 
 # Import analysis modules
-from analysis.etcd.performance_analysis_report import etcdReportAnalyzer
-from analysis.utils.analysis_utility import etcdAnalyzerUtility
+# Ensure project root is on sys.path for module imports when run as a script
+try:
+    from analysis.etcd.performance_analysis_report import etcdReportAnalyzer
+    from analysis.utils.analysis_utility import etcdAnalyzerUtility
+except ModuleNotFoundError:
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+    from analysis.etcd.performance_analysis_report import etcdReportAnalyzer
+    from analysis.utils.analysis_utility import etcdAnalyzerUtility
 
 logging.basicConfig(
     level=logging.INFO,
