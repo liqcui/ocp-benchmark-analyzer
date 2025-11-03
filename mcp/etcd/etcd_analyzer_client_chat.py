@@ -512,7 +512,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-HTML_FILE_PATH = os.path.join(os.path.dirname(__file__), "webroot", "etcd", "etcd_analyzer_mcp_llm.html")
+HTML_FILE_PATH = os.path.abspath(
+    os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "..",
+        "webroot",
+        "etcd",
+        "etcd_analyzer_mcp_llm.html",
+    )
+)
 
 @app.get("/", include_in_schema=False)
 async def serve_root_html():
