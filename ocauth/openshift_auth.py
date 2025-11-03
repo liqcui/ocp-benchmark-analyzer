@@ -136,6 +136,11 @@ class OpenShiftAuth:
         """Backward compatible alias for k8s_client."""
         return self.k8s_client
 
+    @property
+    def prometheus_token(self) -> Optional[str]:
+        """Backward compatible alias commonly used by collectors."""
+        return self.token
+
     def _ensure_k8s_api_connectivity(self) -> None:
         """Probe the Kubernetes API and auto-recover from common SSL/PEM issues.
 
@@ -834,10 +839,13 @@ class OpenShiftAuth:
         """Get Prometheus connection configuration"""
         # Environment overrides
         env_url = os.getenv('PROMETHEUS_URL') or os.getenv('OCP_PROMETHEUS_URL')
+        env_token = os.getenv('PROMETHEUS_TOKEN')
         env_verify = os.getenv('PROMETHEUS_VERIFY')
         if env_url:
             self.logger.info(f"Using PROMETHEUS_URL override: {env_url}")
         base_url = env_url or self.prometheus_url
+        # Prefer explicit PROMETHEUS_TOKEN when provided; otherwise use discovered token
+        token_value: Optional[str] = env_token if env_token else self.token
         verify_value: Any = self.ca_cert_path if self.ca_cert_path else False
         if env_verify is not None:
             env_verify_lower = env_verify.lower()
@@ -864,6 +872,7 @@ class OpenShiftAuth:
         config = {
             'url': base_url,
             'headers': self.get_auth_headers(),
+            'token': token_value,
             'verify': verify_value,
             'fallback_urls': fallback_urls,
         }
