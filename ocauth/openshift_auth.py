@@ -18,7 +18,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 import requests
 
 
-class OCPAuth:
+class OpenShiftAuth:
     """OpenShift authentication and service discovery"""
     
     def __init__(self):
