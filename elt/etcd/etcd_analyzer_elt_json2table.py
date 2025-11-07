@@ -11,21 +11,10 @@ import pandas as pd
 from datetime import datetime
 import re
 from tabulate import tabulate
+import importlib
 
-# Import specialized ELT modules
-from .etcd_analyzer_elt_cluster_info import clusterInfoELT
+# Import utility ELT only; defer specialized ELT imports to runtime to avoid ImportError
 from .etcd_analyzer_elt_utility import utilityELT
-from .etcd_analyzer_elt_cluster_status import etcdClusterStatusELT
-from .etcd_analyzer_elt_disk_io import diskIOELT
-from .etcd_analyzer_elt_general_info import generalInfoELT
-from .etcd_analyzer_elt_wal_fsync import diskWalFsyncELT
-from .etcd_analyzer_elt_backend_commit import backendCommitELT
-from .etcd_analyzer_elt_compact_defrag import compactDefragELT
-from .etcd_analyzer_elt_network_io import networkIOELT
-from .etcd_analyzer_elt_deep_drive import deepDriveELT
-from .etcd_analyzer_elt_bottleneck import bottleneckELT
-from .etcd_analyzer_performance_elt_report import etcdReportELT
-from .etcd_analyzer_elt_node_usage import nodeUsageELT
 
 logger = logging.getLogger(__name__)
 
@@ -34,20 +23,54 @@ class PerformanceDataELT(utilityELT):
     def __init__(self):
         super().__init__()
         self.processed_data = {}
-        # Initialize specialized ELT modules
-        self.cluster_info_elt = clusterInfoELT()
-        self.cluster_status_elt = etcdClusterStatusELT()
-        self.disk_io_elt = diskIOELT()
-        self.wal_fsync_elt = diskWalFsyncELT() 
-        self.backend_commit_elt = backendCommitELT()
-        self.compact_defrag_elt = compactDefragELT()
-        self.general_info_elt = generalInfoELT()
-        self.network_io_elt = networkIOELT()
-        self.deep_drive_elt = deepDriveELT()
-        self.bottleneck_elt = bottleneckELT()
-        self.report_elt = etcdReportELT()
-        self.node_usage_elt = nodeUsageELT()
-        self.logger=logging.getLogger(__name__)
+        self.logger = logging.getLogger(__name__)
+        # Initialize specialized ELT modules lazily with import fallback
+        self.cluster_info_elt = None
+        self.cluster_status_elt = None
+        self.disk_io_elt = None
+        self.wal_fsync_elt = None
+        self.backend_commit_elt = None
+        self.compact_defrag_elt = None
+        self.general_info_elt = None
+        self.network_io_elt = None
+        self.deep_drive_elt = None
+        self.bottleneck_elt = None
+        self.report_elt = None
+        self.node_usage_elt = None
+        
+        def _safe_import(module_name: str, class_name: str):
+            try:
+                module = importlib.import_module(f"{__package__}.{module_name}")
+                return getattr(module, class_name)
+            except Exception as e:
+                logger.warning(f"Optional module {module_name}.{class_name} not available: {e}")
+                return None
+        
+        ClusterInfo = _safe_import('etcd_analyzer_elt_cluster_info', 'clusterInfoELT')
+        ClusterStatus = _safe_import('etcd_analyzer_elt_cluster_status', 'etcdClusterStatusELT')
+        DiskIO = _safe_import('etcd_analyzer_elt_disk_io', 'diskIOELT')
+        WalFsync = _safe_import('etcd_analyzer_elt_wal_fsync', 'diskWalFsyncELT')
+        BackendCommit = _safe_import('etcd_analyzer_elt_backend_commit', 'backendCommitELT')
+        CompactDefrag = _safe_import('etcd_analyzer_elt_compact_defrag', 'compactDefragELT')
+        GeneralInfo = _safe_import('etcd_analyzer_elt_general_info', 'generalInfoELT')
+        NetworkIO = _safe_import('etcd_analyzer_elt_network_io', 'networkIOELT')
+        DeepDrive = _safe_import('etcd_analyzer_elt_deep_drive', 'deepDriveELT')
+        Bottleneck = _safe_import('etcd_analyzer_elt_bottleneck', 'bottleneckELT')
+        ReportELT = _safe_import('etcd_analyzer_performance_elt_report', 'etcdReportELT')
+        NodeUsage = _safe_import('etcd_analyzer_elt_node_usage', 'nodeUsageELT')
+        
+        self.cluster_info_elt = ClusterInfo() if ClusterInfo else None
+        self.cluster_status_elt = ClusterStatus() if ClusterStatus else None
+        self.disk_io_elt = DiskIO() if DiskIO else None
+        self.wal_fsync_elt = WalFsync() if WalFsync else None
+        self.backend_commit_elt = BackendCommit() if BackendCommit else None
+        self.compact_defrag_elt = CompactDefrag() if CompactDefrag else None
+        self.general_info_elt = GeneralInfo() if GeneralInfo else None
+        self.network_io_elt = NetworkIO() if NetworkIO else None
+        self.deep_drive_elt = DeepDrive() if DeepDrive else None
+        self.bottleneck_elt = Bottleneck() if Bottleneck else None
+        self.report_elt = ReportELT() if ReportELT else None
+        self.node_usage_elt = NodeUsage() if NodeUsage else None
 
     def extract_json_data(self, results: Union[Dict[str, Any], str]) -> Dict[str, Any]:
         """Extract relevant data from tool results"""
@@ -91,31 +114,64 @@ class PerformanceDataELT(utilityELT):
             
             # Extract structured data using specialized modules
             if data_type == 'cluster_info':
-                extracted['structured_data'] = self.cluster_info_elt.extract_cluster_info(actual_data)
+                if self.cluster_info_elt:
+                    extracted['structured_data'] = self.cluster_info_elt.extract_cluster_info(actual_data)
+                else:
+                    extracted['structured_data'] = self._extract_generic_data(actual_data)
             elif data_type == 'etcd_cluster_status':
-                extracted['structured_data'] = self.cluster_status_elt.extract_cluster_status(actual_data)
+                if self.cluster_status_elt:
+                    extracted['structured_data'] = self.cluster_status_elt.extract_cluster_status(actual_data)
+                else:
+                    extracted['structured_data'] = self._extract_generic_data(actual_data)
             elif data_type == 'disk_io':
-                extracted['structured_data'] = self.disk_io_elt.extract_disk_io(results)
+                if self.disk_io_elt:
+                    extracted['structured_data'] = self.disk_io_elt.extract_disk_io(results)
+                else:
+                    extracted['structured_data'] = self._extract_generic_data(results)
             elif data_type == 'general_info':
                 # Normalize nested structure if present
                 gen_input = results['data'] if isinstance(results.get('data'), dict) else results
-                extracted['structured_data'] = self.general_info_elt.extract_general_info(gen_input)
+                if self.general_info_elt:
+                    extracted['structured_data'] = self.general_info_elt.extract_general_info(gen_input)
+                else:
+                    extracted['structured_data'] = self._extract_generic_data(gen_input)
             elif data_type == 'wal_fsync':
-                extracted['structured_data'] = self.wal_fsync_elt.extract_wal_fsync(results) 
+                if self.wal_fsync_elt:
+                    extracted['structured_data'] = self.wal_fsync_elt.extract_wal_fsync(results)
+                else:
+                    extracted['structured_data'] = self._extract_generic_data(results)
             elif data_type == 'backend_commit':
-                extracted['structured_data'] = self.backend_commit_elt.extract_backend_commit(actual_data)
+                if self.backend_commit_elt:
+                    extracted['structured_data'] = self.backend_commit_elt.extract_backend_commit(actual_data)
+                else:
+                    extracted['structured_data'] = self._extract_generic_data(actual_data)
             elif data_type == 'compact_defrag':
-                extracted['structured_data'] = self.compact_defrag_elt.extract_compact_defrag(actual_data)                
+                if self.compact_defrag_elt:
+                    extracted['structured_data'] = self.compact_defrag_elt.extract_compact_defrag(actual_data)
+                else:
+                    extracted['structured_data'] = self._extract_generic_data(actual_data)
             elif data_type == 'network_io':  # Add this block
-                extracted['structured_data'] = self.network_io_elt.extract_network_io(results) 
+                if self.network_io_elt:
+                    extracted['structured_data'] = self.network_io_elt.extract_network_io(results)
+                else:
+                    extracted['structured_data'] = self._extract_generic_data(results)
             elif data_type == 'deep_drive':
-                extracted['structured_data'] = self.deep_drive_elt.extract_deep_drive(results)
+                if self.deep_drive_elt:
+                    extracted['structured_data'] = self.deep_drive_elt.extract_deep_drive(results)
+                else:
+                    extracted['structured_data'] = self._extract_generic_data(results)
             elif data_type == 'bottleneck_analysis':
-                extracted['structured_data'] = self.bottleneck_elt.extract_bottleneck_analysis(results)
+                if self.bottleneck_elt:
+                    extracted['structured_data'] = self.bottleneck_elt.extract_bottleneck_analysis(results)
+                else:
+                    extracted['structured_data'] = self._extract_generic_data(results)
             elif data_type == 'performance_report':
                 extracted['structured_data'] = self._extract_performance_report_data(actual_data)
             elif data_type == 'node_usage':
-                extracted['structured_data'] = self.node_usage_elt.extract_node_usage(results)
+                if self.node_usage_elt:
+                    extracted['structured_data'] = self.node_usage_elt.extract_node_usage(results)
+                else:
+                    extracted['structured_data'] = self._extract_generic_data(results)
             else:
                 extracted['structured_data'] = self._extract_generic_data(results)
             
@@ -447,29 +503,29 @@ class PerformanceDataELT(utilityELT):
         """Generate a brief textual summary of the data using specialized modules"""
         try:
             if data_type == 'cluster_info':
-                return self.cluster_info_elt.summarize_cluster_info(structured_data)
+                return self.cluster_info_elt.summarize_cluster_info(structured_data) if self.cluster_info_elt else self._summarize_generic(structured_data)
             elif data_type == 'etcd_cluster_status':
-                return self.cluster_status_elt.summarize_cluster_status(structured_data)
+                return self.cluster_status_elt.summarize_cluster_status(structured_data) if self.cluster_status_elt else self._summarize_generic(structured_data)
             elif data_type == 'disk_io':
-                return self.disk_io_elt.summarize_disk_io(structured_data)
+                return self.disk_io_elt.summarize_disk_io(structured_data) if self.disk_io_elt else self._summarize_generic(structured_data)
             elif data_type == 'wal_fsync':
-                return self.wal_fsync_elt.summarize_wal_fsync(structured_data)
+                return self.wal_fsync_elt.summarize_wal_fsync(structured_data) if self.wal_fsync_elt else self._summarize_generic(structured_data)
             elif data_type == 'backend_commit':
-                return self.backend_commit_elt.summarize_backend_commit(structured_data)
+                return self.backend_commit_elt.summarize_backend_commit(structured_data) if self.backend_commit_elt else self._summarize_generic(structured_data)
             elif data_type == 'general_info':
-                return self.general_info_elt.summarize_general_info(structured_data)
+                return self.general_info_elt.summarize_general_info(structured_data) if self.general_info_elt else self._summarize_generic(structured_data)
             elif data_type == 'compact_defrag':
-                return self.compact_defrag_elt.summarize_compact_defrag(structured_data)
+                return self.compact_defrag_elt.summarize_compact_defrag(structured_data) if self.compact_defrag_elt else self._summarize_generic(structured_data)
             elif data_type == 'network_io':  # Add this line
-                return self.network_io_elt.summarize_network_io(structured_data) 
+                return self.network_io_elt.summarize_network_io(structured_data) if self.network_io_elt else self._summarize_generic(structured_data)
             elif data_type == 'deep_drive':
-                return self.deep_drive_elt.summarize_deep_drive(structured_data) 
+                return self.deep_drive_elt.summarize_deep_drive(structured_data) if self.deep_drive_elt else self._summarize_generic(structured_data)
             elif data_type == 'bottleneck_analysis':
-                return self.bottleneck_elt.summarize_bottleneck_analysis(structured_data)
+                return self.bottleneck_elt.summarize_bottleneck_analysis(structured_data) if self.bottleneck_elt else self._summarize_generic(structured_data)
             elif data_type == 'performance_report':
                 return self._summarize_performance_report(structured_data)
             elif data_type == 'node_usage':
-                return self.node_usage_elt.summarize_node_usage(structured_data)
+                return self.node_usage_elt.summarize_node_usage(structured_data) if self.node_usage_elt else self._summarize_generic(structured_data)
             else:
                 return self._summarize_generic(structured_data)
         
@@ -481,30 +537,30 @@ class PerformanceDataELT(utilityELT):
         """Transform structured data into pandas DataFrames using specialized modules"""
         try:
             if data_type == 'cluster_info':
-                return self.cluster_info_elt.transform_to_dataframes(structured_data)
+                return self.cluster_info_elt.transform_to_dataframes(structured_data) if self.cluster_info_elt else {}
             elif data_type == 'etcd_cluster_status':
-                return self.cluster_status_elt.transform_to_dataframes(structured_data)
+                return self.cluster_status_elt.transform_to_dataframes(structured_data) if self.cluster_status_elt else {}
             elif data_type == 'disk_io':
-                return self.disk_io_elt.transform_to_dataframes(structured_data)
+                return self.disk_io_elt.transform_to_dataframes(structured_data) if self.disk_io_elt else {}
             elif data_type == 'wal_fsync':
-                return self.wal_fsync_elt.transform_to_dataframes(structured_data)
+                return self.wal_fsync_elt.transform_to_dataframes(structured_data) if self.wal_fsync_elt else {}
             elif data_type == 'backend_commit':
-                return self.backend_commit_elt.transform_to_dataframes(structured_data)
+                return self.backend_commit_elt.transform_to_dataframes(structured_data) if self.backend_commit_elt else {}
             elif data_type == 'general_info':
-                return self.general_info_elt.transform_to_dataframes(structured_data)
+                return self.general_info_elt.transform_to_dataframes(structured_data) if self.general_info_elt else {}
             elif data_type == 'compact_defrag':
-                return self.compact_defrag_elt.transform_to_dataframes(structured_data) 
+                return self.compact_defrag_elt.transform_to_dataframes(structured_data) if self.compact_defrag_elt else {}
             elif data_type == 'network_io':
-                logger.info("Processing network_io data type")  # Add this for debugging
-                return self.network_io_elt.transform_to_dataframes(structured_data)  
+                logger.info("Processing network_io data type")
+                return self.network_io_elt.transform_to_dataframes(structured_data) if self.network_io_elt else {}
             elif data_type == 'deep_drive':
-                return self.deep_drive_elt.transform_to_dataframes(structured_data)
+                return self.deep_drive_elt.transform_to_dataframes(structured_data) if self.deep_drive_elt else {}
             elif data_type == 'bottleneck_analysis':
-                return self.bottleneck_elt.transform_to_dataframes(structured_data)
+                return self.bottleneck_elt.transform_to_dataframes(structured_data) if self.bottleneck_elt else {}
             elif data_type == 'performance_report':
                 return self._transform_performance_report_to_dataframes(structured_data)
             elif data_type == 'node_usage':
-                return self.node_usage_elt.transform_to_dataframes(structured_data)                
+                return self.node_usage_elt.transform_to_dataframes(structured_data) if self.node_usage_elt else {}
             else:
                 # Default transformation for other data types
                 dataframes = {}
@@ -626,27 +682,27 @@ class PerformanceDataELT(utilityELT):
         """Generate HTML tables using specialized modules"""
         try:
             if data_type == 'cluster_info':
-                html_tables = self.cluster_info_elt.generate_html_tables(dataframes)
+                html_tables = self.cluster_info_elt.generate_html_tables(dataframes) if self.cluster_info_elt else {}
             elif data_type == 'etcd_cluster_status':
-                html_tables = self.cluster_status_elt.generate_html_tables(dataframes)
+                html_tables = self.cluster_status_elt.generate_html_tables(dataframes) if self.cluster_status_elt else {}
             elif data_type == 'node_usage':
-                html_tables = self.node_usage_elt.generate_html_tables(dataframes)                
+                html_tables = self.node_usage_elt.generate_html_tables(dataframes) if self.node_usage_elt else {}
             elif data_type == 'disk_io':
-                html_tables = self.disk_io_elt.generate_html_tables(dataframes)
+                html_tables = self.disk_io_elt.generate_html_tables(dataframes) if self.disk_io_elt else {}
             elif data_type == 'wal_fsync':
-                html_tables = self.wal_fsync_elt.generate_html_tables(dataframes)
+                html_tables = self.wal_fsync_elt.generate_html_tables(dataframes) if self.wal_fsync_elt else {}
             elif data_type == 'backend_commit':
-                html_tables = self.backend_commit_elt.generate_html_tables(dataframes)
+                html_tables = self.backend_commit_elt.generate_html_tables(dataframes) if self.backend_commit_elt else {}
             elif data_type == 'general_info':
-                html_tables = self.general_info_elt.generate_html_tables(dataframes)
+                html_tables = self.general_info_elt.generate_html_tables(dataframes) if self.general_info_elt else {}
             elif data_type == 'compact_defrag':
-                html_tables = self.compact_defrag_elt.generate_html_tables(dataframes)
+                html_tables = self.compact_defrag_elt.generate_html_tables(dataframes) if self.compact_defrag_elt else {}
             elif data_type == 'network_io':
-                html_tables = self.network_io_elt.generate_html_tables(dataframes)
+                html_tables = self.network_io_elt.generate_html_tables(dataframes) if self.network_io_elt else {}
             elif data_type == 'deep_drive':
-                html_tables = self.deep_drive_elt.generate_html_tables(dataframes)
+                html_tables = self.deep_drive_elt.generate_html_tables(dataframes) if self.deep_drive_elt else {}
             elif data_type == 'bottleneck_analysis':
-                html_tables = self.bottleneck_elt.generate_html_tables(dataframes)
+                html_tables = self.bottleneck_elt.generate_html_tables(dataframes) if self.bottleneck_elt else {}
             elif data_type == 'performance_report':
                 # Check if we have pre-generated HTML tables
                 if '_html_tables' in dataframes:

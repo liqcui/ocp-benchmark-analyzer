@@ -597,7 +597,7 @@ Always structure your responses with:
 - Next steps for investigation or remediation
 - Highlight critial issue or higher than threshold via red charactor/words, Using bold green or bold orange, or bold purple and other colour to distiguish different info/warning/status, make the analysis result readable and clear
 - If no specify the value of threshold, follow the industry standard.
-- Don't create table when analysis cluster info and etcd status.
+- Don't create table.
 
 Provide actionable insights with specific metric values, trends over time, and recommendations based on temporal patterns. explain the business impact of technical issues."""
 
