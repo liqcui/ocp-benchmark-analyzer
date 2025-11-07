@@ -93,7 +93,7 @@ class GenericELT(utilityELT):
         
         # Import and register all metric handlers
         try:
-            from .ocp.analyzer_elt_cluster_info import clusterInfoELT
+            from ..ocp.analyzer_elt_cluster_info import clusterInfoELT
             register_metric_handler(
                 'cluster_info', 
                 clusterInfoELT,
