@@ -589,7 +589,17 @@ TIME RANGE EXAMPLES IN USER QUERIES:
 - "during the incident at 2pm yesterday" → calculate UTC time range
 - "between Jan 15 10:00 and Jan 15 12:00" → start_time="2025-01-15T10:00:00Z", end_time="2025-01-15T12:00:00Z"
 
-Provide actionable insights with specific metric values, trends over time, and recommendations based on temporal patterns."""
+Always structure your responses with:
+- Explain metrics and typical scenario that used for metrics
+- Executive summary of findings
+- Detailed technical analysis
+- Specific recommendations with priority levels
+- Next steps for investigation or remediation
+- Highlight critial issue or higher than threshold via red charactor/words, Using bold green or bold orange, or bold purple and other colour to distiguish different info/warning/status, make the analysis result readable and clear
+- If no specify the value of threshold, follow the industry standard.
+- Don't create table when analysis cluster info and etcd status.
+
+Provide actionable insights with specific metric values, trends over time, and recommendations based on temporal patterns. explain the business impact of technical issues."""
 
         load_dotenv()
         api_key = os.getenv("OPENAI_API_KEY")
