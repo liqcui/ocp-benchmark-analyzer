@@ -251,28 +251,6 @@ async def initialize_collectors():
         config = Config()
         metrics_etcd_file = os.path.join(PROJECT_ROOT, 'config', 'metrics-etcd.yml')
         metrics_disk_file = os.path.join(PROJECT_ROOT, 'config', 'metrics-disk.yml')
-        #        
-        # loaded_before = config.get_metrics_count()
-        # if loaded_before == 0:
-        #     metrics_etcd_file = os.path.join(PROJECT_ROOT, 'config', 'metrics-etcd.yml')
-        #     metrics_disk_file = os.path.join(PROJECT_ROOT, 'config', 'metrics-disk.yml')
-        #     load_result4disk = config.load_metrics_file(metrics_disk_file)
-        #     load_result = config.load_metrics_file(metrics_etcd_file)
-        #     total_after = config.get_metrics_count()
-        #     if total_after > 0:
-        #         file_summary = config.get_file_summary()
-        #         files_descr = ", ".join(
-        #             f"{v['file_name']}={v['metrics_count']}" for v in file_summary.values()
-        #         ) or os.path.basename(metrics_etcd_file)
-        #         logger.info(f"Metrics loaded: total={total_after}, files=[{files_descr}]")
-        #     else:
-        #         logger.warning(f"No metrics loaded: {load_result.get('error', 'no metrics found')}")
-        # else:
-        #     file_summary = config.get_file_summary()
-        #     total = config.get_metrics_count()
-        #     files_descr = ", ".join(f"{v['file_name']}={v['metrics_count']}" for v in file_summary.values())
-        #     logger.info(f"Metrics preloaded: total={total}, files=[{files_descr}]")
-
         
         # Initialize OpenShift authentication (use kubeconfig from config if provided)
         logger.info("🔗 Initializing OpenShift authentication...")
@@ -399,12 +377,20 @@ async def get_ocp_cluster_info() -> OCPClusterInfoResponse:
         OCPClusterInfoResponse: Comprehensive cluster information including cluster details, node inventory, resource statistics, and operator status
     """
     try:
-        global cluster_info_collector
+        global cluster_info_collector, auth_manager, config
         if cluster_info_collector is None:
-            # Lazy initialize the ClusterInfoCollector on first use
+            # Prefer reusing existing auth_manager when available; otherwise pass kubeconfig path
             try:
-                cluster_info_collector = ClusterInfoCollector()
-                await cluster_info_collector.initialize()
+                collector = ClusterInfoCollector(
+                    kubeconfig_path=(config.kubeconfig_path if config else None)
+                )
+                if auth_manager:
+                    # Reuse existing initialized auth to avoid duplicate initialization and SSL issues
+                    collector.auth_manager = auth_manager
+                    collector.k8s_client = auth_manager.kube_client
+                else:
+                    await collector.initialize()
+                cluster_info_collector = collector
             except Exception as init_err:
                 return OCPClusterInfoResponse(
                     status="error",
