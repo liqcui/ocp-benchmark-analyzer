@@ -724,16 +724,25 @@
             } catch (e) { return text; }
         }
 
-        // Fix common mojibake (UTF-8 shown as Latin-1) like "ð" by re-decoding as UTF-8
+        // Fix common mojibake (UTF-8 shown as Latin-1) like "ð" safely
         function fixMojibake(text) {
             try {
                 if (!text || typeof text !== 'string') return text;
-                // decodeURIComponent(escape(...)) reinterprets the string's bytes as UTF-8
-                // Only apply when there are suspicious high-byte characters
-                if (/[-FFFF]/.test(text)) {
+                // Heuristic: attempt fix only when typical mojibake lead bytes appear
+                const maybeMojibake = /[ÃÂâð]/.test(text);
+                if (!maybeMojibake) return text;
+                try {
+                    // Reinterpret string bytes as UTF-8
                     return decodeURIComponent(escape(text));
+                } catch (e) {
+                    // Fallback: latin1 -> utf8 via TextDecoder
+                    try {
+                        const bytes = Uint8Array.from(Array.from(text, c => c.charCodeAt(0) & 0xFF));
+                        return new TextDecoder('utf-8').decode(bytes);
+                    } catch (_) {
+                        return text;
+                    }
                 }
-                return text;
             } catch (e) { return text; }
         }
 
