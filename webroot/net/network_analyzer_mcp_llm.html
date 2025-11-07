@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OpenShift ETCD Analyzer MCP - AI Chat Interface</title>
+    <title>OpenShift Network Analyzer MCP - AI Chat Interface</title>
     <style>
         * {
             margin: 0;
@@ -588,7 +588,7 @@
     <div class="container">
         <div class="sidebar">
             <div class="sidebar-header">
-                <h1>OCP ETCD Analyzer</h1>
+                <h1>OCP Network Analyzer</h1>
                 <p>AI-Powered Performance Analysis</p>
             </div>
             <div class="quick-actions">
@@ -600,16 +600,12 @@
                 <button class="action-button"
                     onclick="sendQuickMessage('Show me Layer 1 network metrics across all cluster nodes')">🖥️
                     Network L1</button>
-                <button class="action-button" onclick="sendQuickMessage('Show me etcd master node usage')">🖥️
-                    Etcd
-                    Nodes Usage</button>
-                <button class="action-button" onclick="sendQuickMessage('Show me the etcd network IO usage')">🌐
-                    Etcd
-                    Network IO</button>
-                <button class="action-button" onclick="sendQuickMessage('Show me the etcd disk IO usage')">💾
-                    Etcd
-                    Disk
-                    IO</button>
+                <button class="action-button"
+                    onclick="sendQuickMessage('Show me network socket tcp statics information in current openshift cluster')">🖥️
+                    Network Socket TCP</button>
+                <button class="action-button"
+                    onclick="sendQuickMessage('Show me network socket udp statics information in current openshift cluster')">💾
+                    Network Socket UDP</button>
                 <button class="action-button" onclick="sendQuickMessage('Show me the etcd wal fsync')">🔄
                     Etcd Wal
                     Fsync</button>
@@ -620,6 +616,9 @@
                     onclick="sendQuickMessage('Show me the etcd compact and defrag usage')">🗜️
                     Etcd
                     Compact Defrag</button>
+                <button class="action-button" onclick="sendQuickMessage('Show me the etcd network IO usage')">🌐
+                    Etcd
+                    Network IO</button>
                 <button class="action-button"
                     onclick="sendQuickMessage('Deep drive analysis for etcd performance and find bottleneck.')">🔍
                     ETCD

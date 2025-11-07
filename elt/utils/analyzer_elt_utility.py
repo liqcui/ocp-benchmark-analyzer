@@ -724,3 +724,57 @@ class utilityELT:
             return self.create_status_badge('success', 'Yes')
         else:
             return self.create_status_badge('danger', 'No')            
+
+    # ============================================================================
+    # GENERIC VALUE + UNIT FORMATTERS (REUSABLE ACROSS METRICS)
+    # ============================================================================
+    
+    def format_value_with_unit(self, value: float, unit: str) -> str:
+        """Format a numeric value with a unit into a readable string.
+        Supports common units like count, bytes, bits_per_second, bytes_per_second, percent, iops.
+        """
+        try:
+            unit_lower = (unit or '').strip().lower()
+            if unit_lower in ['', 'count', 'connections', 'sockets']:
+                return self.format_count_value(value)
+            elif unit_lower in ['bytes', 'byte']:
+                # Reuse bytes/s formatter scale logic but without /s suffix
+                val = float(value)
+                if val < 1024:
+                    return f"{val:.0f} B"
+                elif val < 1024**2:
+                    return f"{val/1024:.1f} KB"
+                elif val < 1024**3:
+                    return f"{val/(1024**2):.1f} MB"
+                else:
+                    return f"{val/(1024**3):.2f} GB"
+            elif unit_lower in ['bytes_per_second', 'b/s', 'byte/s']:
+                return self.format_bytes_per_second(value)
+            elif unit_lower in ['bits_per_second', 'bps']:
+                return self.format_network_speed(value)
+            elif unit_lower in ['percent', '%']:
+                return self.format_percentage(value)
+            elif unit_lower in ['iops', 'ops', 'ops_per_second']:
+                return self.format_operations_per_second(value)
+            elif unit_lower in ['seconds', 'sec', 's']:
+                return self.format_duration_seconds(value)
+            else:
+                # Fallback: plain value with unit suffix
+                try:
+                    val = float(value)
+                    return f"{val:g} {unit}".strip()
+                except (ValueError, TypeError):
+                    return f"{value} {unit}".strip()
+        except Exception:
+            return f"{value} {unit}".strip()
+
+    def format_and_highlight(self, value: float, unit: str, 
+                             thresholds: Dict[str, float], 
+                             is_top: bool = False) -> str:
+        """Format a value with unit, then apply highlight thresholds/top-1 wrapper."""
+        readable = self.format_value_with_unit(value, unit)
+        # highlight_critical_values expects numeric plus unit suffix, not pre-formatted with scales.
+        # To preserve highlight semantics, extract numeric back from readable for thresholds.
+        numeric = self.extract_numeric_value(readable)
+        unit_suffix = '' if unit in ['count', '', None] else f" {unit}"
+        return self.highlight_critical_values(numeric, thresholds or {}, unit_suffix, is_top)

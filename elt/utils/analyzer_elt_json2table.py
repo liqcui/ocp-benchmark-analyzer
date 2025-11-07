@@ -120,6 +120,17 @@ class GenericELT(utilityELT):
             )
         except ImportError as e:
             logger.warning(f"Could not import network_l1 handler: {e}")
+        
+        # Register network_socket_tcp handler
+        try:
+            from ..net.analyzer_elt_network_socket4tcp import networkSocketTCPELT
+            register_metric_handler(
+                'network_socket_tcp',
+                networkSocketTCPELT,
+                self._is_network_socket_tcp
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import network_socket_tcp handler: {e}")
             
         self.registry._initialized = True
     
@@ -180,6 +191,19 @@ class GenericELT(utilityELT):
                         return True
         return False
 
+    @staticmethod
+    def _is_network_socket_tcp(data: Dict[str, Any]) -> bool:
+        """Identify network socket TCP data"""
+        if 'category' in data and data.get('category') == 'network_socket_tcp':
+            return True
+        if 'metrics' in data and isinstance(data.get('metrics'), dict):
+            metric_keys = data['metrics'].keys()
+            if any('socket_tcp' in k or 'sockstat' in k for k in metric_keys):
+                return True
+        if 'nodes' in data and isinstance(data.get('nodes'), dict):
+            return True
+        return False
+
     # ============================================================================
     # MAIN PROCESSING PIPELINE
     # ============================================================================
@@ -230,6 +254,9 @@ class GenericELT(utilityELT):
             elif data_type == 'network_l1':
                 structured_data = handler.extract_network_l1(actual_data) if hasattr(handler, 'extract_network_l1') else {}
                 summary_method = 'summarize_network_l1'
+            elif data_type == 'network_socket_tcp':
+                structured_data = handler.extract_network_socket_tcp(actual_data) if hasattr(handler, 'extract_network_socket_tcp') else {}
+                summary_method = 'summarize_network_socket_tcp'
             else:
                 # Generic fallback
                 structured_data = handler.extract_cluster_info(actual_data) if hasattr(handler, 'extract_cluster_info') else {}
@@ -273,6 +300,13 @@ class GenericELT(utilityELT):
             if 'data' in data and isinstance(data.get('data'), dict):
                 return data['data']
             # Some responses may nest under 'result' → 'data'
+            if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
+                return data['result']['data']
+
+        # Unwrap for network_socket_tcp
+        if data_type == 'network_socket_tcp':
+            if 'data' in data and isinstance(data.get('data'), dict):
+                return data['data']
             if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
                 return data['result']['data']
         
