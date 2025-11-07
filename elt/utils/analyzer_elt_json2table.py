@@ -109,7 +109,18 @@ class GenericELT(utilityELT):
         #     register_metric_handler('disk_io', diskIOELT, self._is_disk_io)
         # except ImportError:
         #     pass
-        
+
+        # Add to _ensure_handlers_registered method after cluster_info registration
+        try:
+            from ..net.analyzer_elt_network_l1 import networkL1ELT
+            register_metric_handler(
+                'network_l1', 
+                networkL1ELT,
+                self._is_network_l1
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import network_l1 handler: {e}")
+            
         self.registry._initialized = True
     
     # ============================================================================
@@ -153,7 +164,22 @@ class GenericELT(utilityELT):
             return True
         
         return False
-    
+
+    # Add this static method to GenericELT class after _is_cluster_info
+    @staticmethod
+    def _is_network_l1(data: Dict[str, Any]) -> bool:
+        """Identify network L1 data"""
+        if 'category' in data and data.get('category') == 'network_l1':
+            return True
+        if 'node_groups' in data and isinstance(data.get('node_groups'), dict):
+            node_groups = data['node_groups']
+            for role_data in node_groups.values():
+                if isinstance(role_data, dict) and 'metrics' in role_data:
+                    metrics = role_data['metrics']
+                    if any('network_l1' in str(k) for k in metrics.keys()):
+                        return True
+        return False
+         
     # ============================================================================
     # MAIN PROCESSING PIPELINE
     # ============================================================================

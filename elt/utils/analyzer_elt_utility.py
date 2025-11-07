@@ -692,3 +692,35 @@ class utilityELT:
             return f"{percentage:.{precision}f}%"
         except (ValueError, TypeError, ZeroDivisionError):
             return "N/A"
+
+    def format_network_speed(self, bits_per_sec: float) -> str:
+        """Format network speed to readable units"""
+        try:
+            bits_per_sec = float(bits_per_sec)
+            if bits_per_sec == 0:
+                return "0 bps"
+            elif bits_per_sec < 1000:
+                return f"{bits_per_sec:.0f} bps"
+            elif bits_per_sec < 1000000:
+                return f"{bits_per_sec/1000:.1f} Kbps"
+            elif bits_per_sec < 1000000000:
+                return f"{bits_per_sec/1000000:.1f} Mbps"
+            else:
+                return f"{bits_per_sec/1000000000:.2f} Gbps"
+        except (ValueError, TypeError):
+            return str(bits_per_sec)
+
+    def format_mtu_bytes(self, bytes_val: float) -> str:
+        """Format MTU bytes to readable format"""
+        try:
+            bytes_val = float(bytes_val)
+            return f"{int(bytes_val)} bytes"
+        except (ValueError, TypeError):
+            return str(bytes_val)
+
+    def format_status(self, status: str) -> str:
+        """Format Yes/No status with badge"""
+        if str(status).lower() in ['yes', '1', 'true']:
+            return self.create_status_badge('success', 'Yes')
+        else:
+            return self.create_status_badge('danger', 'No')            
