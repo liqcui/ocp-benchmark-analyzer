@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, AsyncGenerator
@@ -31,7 +32,23 @@ from langgraph.prebuilt import create_react_agent
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.checkpoint.memory import MemorySaver
 from dotenv import load_dotenv
-from elt.utils.analyzer_elt_json2table import convert_json_to_html_table
+
+# Ensure project root is on sys.path so package imports like `elt.*` work when run directly
+CURRENT_DIR = os.path.dirname(__file__)
+PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, "..", ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+# Fallback-safe import for HTML conversion utility
+try:
+    from elt.utils.analyzer_elt_json2table import convert_json_to_html_table
+except Exception:
+    def convert_json_to_html_table(json_data):
+        # Minimal fallback: pretty JSON string when converter module not available
+        try:
+            return json.dumps(json_data, indent=2) if not isinstance(json_data, str) else json_data
+        except Exception:
+            return str(json_data)
 
 import warnings
 # Suppress urllib3 deprecation warning triggered by kubernetes client using HTTPResponse.getheaders()
