@@ -42,11 +42,14 @@ class OpenShiftAuth:
     async def initialize(self) -> bool:
         """Initialize Kubernetes client and discover services"""
         try:
-            # Clear any potentially broken REQUESTS_CA_BUNDLE before loading kubeconfig
-            # This is the root cause of the PEM lib error - an invalid CA bundle
+            # Clear any potentially broken CA bundle envs before loading kubeconfig
+            # Misconfigured CA bundles are a common root cause of PEM lib errors
             original_ca_bundle = os.environ.pop('REQUESTS_CA_BUNDLE', None)
+            original_curl_bundle = os.environ.pop('CURL_CA_BUNDLE', None)
             if original_ca_bundle:
                 self.logger.info(f"Temporarily cleared REQUESTS_CA_BUNDLE: {original_ca_bundle}")
+            if original_curl_bundle:
+                self.logger.info(f"Temporarily cleared CURL_CA_BUNDLE: {original_curl_bundle}")
             
             # Load kubeconfig (use explicit path when provided)
             if self.kubeconfig_path:

@@ -54,7 +54,7 @@ except ImportError as e:
 
 # Import our modules
 try:
-    from ocauth.openshift_auth import OpenShiftAuth as OCPAuth
+    from ocauth.openshift_auth import OpenShiftAuth
     from tools.etcd.etcd_cluster_status import ClusterStatCollector
     from tools.etcd.etcd_general_info import GeneralInfoCollector
     from tools.etcd.etcd_disk_compact_defrag import CompactDefragCollector
@@ -224,7 +224,7 @@ def _duration_from_time_range(start_time_iso: Optional[str], end_time_iso: Optio
 mcp = FastMCP("OpenShift etcd Analyzer")
 
 # Global variables for collectors
-ocp_auth = None
+auth_manager = None
 config = None
 cluster_collector = None
 general_collector = None
@@ -238,7 +238,7 @@ node_usage_collector = None
 
 async def initialize_collectors():
     """Initialize all collectors with authentication - each loads its own metrics"""
-    global ocp_auth, config, cluster_collector, general_collector, compact_defrag_collector
+    global auth_manager, config, cluster_collector, general_collector, compact_defrag_collector
     global wal_fsync_collector, backend_commit_collector, network_collector, disk_io_collector
     global cluster_info_collector, node_usage_collector
 
@@ -247,60 +247,80 @@ async def initialize_collectors():
         logger.info("Initializing OpenShift etcd Analyzer components...")
         logger.info("="*70)
         
-        # Initialize OpenShift authentication FIRST
-        logger.info("🔗 Initializing OpenShift authentication...")
-        ocp_auth = OCPAuth()
-        await ocp_auth.initialize()
-        logger.info("✅ OpenShift authentication initialized successfully")
-        logger.info("")
-        
-        # Initialize global config for shared access (optional)
+        # Initialize global config for shared access using metrics-etcd.yml only                
+        config = Config()
         metrics_etcd_file = os.path.join(PROJECT_ROOT, 'config', 'metrics-etcd.yml')
         metrics_disk_file = os.path.join(PROJECT_ROOT, 'config', 'metrics-disk.yml')
+        #        
+        # loaded_before = config.get_metrics_count()
+        # if loaded_before == 0:
+        #     metrics_etcd_file = os.path.join(PROJECT_ROOT, 'config', 'metrics-etcd.yml')
+        #     metrics_disk_file = os.path.join(PROJECT_ROOT, 'config', 'metrics-disk.yml')
+        #     load_result4disk = config.load_metrics_file(metrics_disk_file)
+        #     load_result = config.load_metrics_file(metrics_etcd_file)
+        #     total_after = config.get_metrics_count()
+        #     if total_after > 0:
+        #         file_summary = config.get_file_summary()
+        #         files_descr = ", ".join(
+        #             f"{v['file_name']}={v['metrics_count']}" for v in file_summary.values()
+        #         ) or os.path.basename(metrics_etcd_file)
+        #         logger.info(f"Metrics loaded: total={total_after}, files=[{files_descr}]")
+        #     else:
+        #         logger.warning(f"No metrics loaded: {load_result.get('error', 'no metrics found')}")
+        # else:
+        #     file_summary = config.get_file_summary()
+        #     total = config.get_metrics_count()
+        #     files_descr = ", ".join(f"{v['file_name']}={v['metrics_count']}" for v in file_summary.values())
+        #     logger.info(f"Metrics preloaded: total={total}, files=[{files_descr}]")
+
         
-        config = Config()
-        config.load_metrics_file(metrics_etcd_file)
-        
+        # Initialize OpenShift authentication (use kubeconfig from config if provided)
+        logger.info("🔗 Initializing OpenShift authentication...")
+        auth_manager = OpenShiftAuth(config.kubeconfig_path)
+        await auth_manager.initialize()
+        logger.info("✅ OpenShift authentication initialized successfully")
+        logger.info("")
+
         # Initialize collectors - each will load and log their own category metrics
         logger.info("📊 Initializing metric collectors...")
         logger.info("-" * 70)
         
         # Cluster Status Collector
         logger.info("Initializing ClusterStatCollector...")
-        cluster_collector = ClusterStatCollector(ocp_auth, metrics_file_path=metrics_etcd_file)
+        cluster_collector = ClusterStatCollector(auth_manager, metrics_file_path=metrics_etcd_file)
         
         # General Info Collector
         logger.info("Initializing GeneralInfoCollector...")
-        general_collector = GeneralInfoCollector(ocp_auth, metrics_file_path=metrics_etcd_file)
+        general_collector = GeneralInfoCollector(auth_manager, metrics_file_path=metrics_etcd_file)
         
         # Compact/Defrag Collector
         logger.info("Initializing CompactDefragCollector...")
-        compact_defrag_collector = CompactDefragCollector(ocp_auth, metrics_file_path=metrics_etcd_file)
+        compact_defrag_collector = CompactDefragCollector(auth_manager, metrics_file_path=metrics_etcd_file)
         
         # WAL Fsync Collector
         logger.info("Initializing DiskWALFsyncCollector...")
-        wal_fsync_collector = DiskWALFsyncCollector(ocp_auth, metrics_file_path=metrics_etcd_file)
+        wal_fsync_collector = DiskWALFsyncCollector(auth_manager, metrics_file_path=metrics_etcd_file)
         
         # Backend Commit Collector
         logger.info("Initializing DiskBackendCommitCollector...")
-        backend_commit_collector = DiskBackendCommitCollector(ocp_auth, metrics_file_path=metrics_etcd_file)
+        backend_commit_collector = DiskBackendCommitCollector(auth_manager, metrics_file_path=metrics_etcd_file)
         
         # Network IO Collector
         logger.info("Initializing NetworkIOCollector...")
-        network_collector = NetworkIOCollector(ocp_auth, metrics_file_path=metrics_etcd_file)
+        network_collector = NetworkIOCollector(auth_manager, metrics_file_path=metrics_etcd_file)
         
         # Disk IO Collector - uses metrics-disk.yml
         logger.info("Initializing DiskIOCollector...")
-        disk_io_collector = DiskIOCollector(ocp_auth, duration="1h", metrics_file_path=metrics_disk_file)
+        disk_io_collector = DiskIOCollector(auth_manager, duration="1h", metrics_file_path=metrics_disk_file)
         
         # Node Usage Collector
         logger.info("Initializing nodeUsageCollector...")
         prometheus_config = {
-            'url': ocp_auth.prometheus_url,
-            'token': getattr(ocp_auth, 'prometheus_token', None),
+            'url': auth_manager.prometheus_url,
+            'token': getattr(auth_manager, 'prometheus_token', None),
             'verify_ssl': False
         }
-        node_usage_collector = nodeUsageCollector(ocp_auth, prometheus_config)
+        node_usage_collector = nodeUsageCollector(auth_manager, prometheus_config)
         # Note: nodeUsageCollector doesn't use etcd metrics, so no logging needed
         logger.info("✅ nodeUsageCollector initialized (uses node metrics)")
         
@@ -328,7 +348,7 @@ async def initialize_collectors():
 async def get_server_health() -> ServerHealthResponse:
     """Get server health status and collector initialization status"""
     collectors_initialized = all([
-        ocp_auth is not None,
+        auth_manager is not None,
         config is not None,
         cluster_collector is not None,
         general_collector is not None,
@@ -344,7 +364,7 @@ async def get_server_health() -> ServerHealthResponse:
         timestamp=datetime.now(pytz.UTC).isoformat(),
         collectors_initialized=collectors_initialized,
         details={
-            "ocp_auth": ocp_auth is not None,
+            "auth_manager": auth_manager is not None,
             "config": config is not None,
             "cluster_collector": cluster_collector is not None,
             "general_collector": general_collector is not None,
@@ -435,13 +455,13 @@ async def get_etcd_node_usage(duration: str = "1h") -> ETCDNodeUsageResponse:
         ETCDNodeUsageResponse: Node usage metrics including CPU usage by mode, memory consumption, cache/buffer statistics, and cgroup-level resource utilization for all master nodes
     """
     try:
-        global ocp_auth, node_usage_collector
+        global auth_manager, node_usage_collector
         if not node_usage_collector:
             # Lazy initialize if startup initialization didn't complete
-            if ocp_auth is None:
-                ocp_auth = OCPAuth()
+            if auth_manager is None:
+                auth_manager = OpenShiftAuth(config.kubeconfig_path if config else None)
                 try:
-                    await ocp_auth.initialize()
+                    await auth_manager.initialize()
                 except Exception:
                     return ETCDNodeUsageResponse(
                         status="error",
@@ -451,11 +471,11 @@ async def get_etcd_node_usage(duration: str = "1h") -> ETCDNodeUsageResponse:
                     )
             try:
                 prometheus_config = {
-                    'url': ocp_auth.prometheus_url,
-                    'token': getattr(ocp_auth, 'prometheus_token', None),
+                    'url': auth_manager.prometheus_url,
+                    'token': getattr(auth_manager, 'prometheus_token', None),
                     'verify_ssl': False
                 }
-                node_usage_collector = nodeUsageCollector(ocp_auth, prometheus_config)
+                node_usage_collector = nodeUsageCollector(auth_manager, prometheus_config)
             except Exception as e:
                 return ETCDNodeUsageResponse(
                     status="error",
@@ -640,13 +660,13 @@ async def get_etcd_disk_wal_fsync(duration: str = "1h") -> ETCDWALFsyncResponse:
         ETCDWALFsyncResponse: WAL fsync performance metrics including P99 latency, operation rates, and cluster-wide analysis with storage performance recommendations
     """
     try:
-        global ocp_auth, wal_fsync_collector
+        global auth_manager, wal_fsync_collector
         if not wal_fsync_collector:
             # Lazy initialize if startup initialization didn't complete
-            if ocp_auth is None:
-                ocp_auth = OCPAuth()
+            if auth_manager is None:
+                auth_manager = OpenShiftAuth(config.kubeconfig_path if config else None)
                 try:
-                    await ocp_auth.initialize()
+                    await auth_manager.initialize()
                 except Exception:
                     return ETCDWALFsyncResponse(
                         status="error",
@@ -655,7 +675,7 @@ async def get_etcd_disk_wal_fsync(duration: str = "1h") -> ETCDWALFsyncResponse:
                         duration=duration
                     )
             try:
-                wal_fsync_collector = DiskWALFsyncCollector(ocp_auth, duration)
+                wal_fsync_collector = DiskWALFsyncCollector(auth_manager, duration)
             except Exception as e:
                 return ETCDWALFsyncResponse(
                     status="error",
@@ -757,13 +777,13 @@ async def get_etcd_network_io(duration: str = "1h") -> ETCDNetworkIOResponse:
         ETCDNetworkIOResponse: Network I/O performance metrics including container/peer/client network statistics, node utilization, error rates, and health assessment
     """
     try:
-        global ocp_auth, network_collector
+        global auth_manager, network_collector
         if not network_collector:
             # Lazy initialize if startup initialization didn't complete
-            if ocp_auth is None:
-                ocp_auth = OCPAuth()
+            if auth_manager is None:
+                auth_manager = OpenShiftAuth(config.kubeconfig_path if config else None)
                 try:
-                    await ocp_auth.initialize()
+                    await auth_manager.initialize()
                 except Exception:
                     return ETCDNetworkIOResponse(
                         status="error",
@@ -772,7 +792,7 @@ async def get_etcd_network_io(duration: str = "1h") -> ETCDNetworkIOResponse:
                         duration=duration
                     )
             try:
-                network_collector = NetworkIOCollector(ocp_auth)
+                network_collector = NetworkIOCollector(auth_manager)
             except Exception as e:
                 return ETCDNetworkIOResponse(
                     status="error",
@@ -831,13 +851,13 @@ async def get_etcd_disk_io(duration: str = "1h") -> ETCDDiskIOResponse:
         ETCDDiskIOResponse: Disk I/O performance metrics including container write rates, node throughput/IOPS, device statistics, and storage optimization recommendations
     """
     try:
-        global ocp_auth, disk_io_collector, PROJECT_ROOT
+        global auth_manager, disk_io_collector, PROJECT_ROOT
         if not disk_io_collector:
             # Lazy initialize if startup initialization didn't complete
-            if ocp_auth is None:
-                ocp_auth = OCPAuth()
+            if auth_manager is None:
+                auth_manager = OpenShiftAuth(config.kubeconfig_path if config else None)
                 try:
-                    await ocp_auth.initialize()
+                    await auth_manager.initialize()
                 except Exception:
                     return ETCDDiskIOResponse(
                         status="error",
@@ -848,7 +868,7 @@ async def get_etcd_disk_io(duration: str = "1h") -> ETCDDiskIOResponse:
             try:
                 # Use metrics-disk.yml for disk I/O metrics
                 metrics_disk_file = os.path.join(PROJECT_ROOT, 'config', 'metrics-disk.yml')
-                disk_io_collector = DiskIOCollector(ocp_auth, duration, metrics_file_path=metrics_disk_file)
+                disk_io_collector = DiskIOCollector(auth_manager, duration, metrics_file_path=metrics_disk_file)
             except Exception as e:
                 return ETCDDiskIOResponse(
                     status="error",
@@ -921,8 +941,8 @@ async def get_etcd_performance_deep_drive(
         ETCDPerformanceDeepDriveResponse: Comprehensive performance analysis including all subsystem metrics, latency analysis, performance summary, and actionable insights with unique test ID for tracking
     """
     try:
-        global ocp_auth
-        if not ocp_auth:
+        global auth_manager
+        if not auth_manager:
             return ETCDPerformanceDeepDriveResponse(
                 status="error",
                 error="OpenShift authentication not initialized",
@@ -948,7 +968,7 @@ async def get_etcd_performance_deep_drive(
             computed = _duration_from_time_range(start_time, end_time)
             if computed:
                 eff_duration = computed
-        deep_drive_analyzer = etcdDeepDriveAnalyzer(ocp_auth, eff_duration)
+        deep_drive_analyzer = etcdDeepDriveAnalyzer(auth_manager, eff_duration)
         
         # Perform the comprehensive analysis
         result = await deep_drive_analyzer.analyze_performance_deep_drive()
@@ -1019,8 +1039,8 @@ async def get_etcd_bottleneck_analysis(duration: str = "1h") -> ETCDBottleneckAn
         ETCDBottleneckAnalysisResponse: Comprehensive bottleneck analysis including identified performance issues, root cause analysis, and prioritized optimization recommendations with unique test ID
     """
     try:
-        global ocp_auth
-        if not ocp_auth:
+        global auth_manager
+        if not auth_manager:
             return ETCDBottleneckAnalysisResponse(
                 status="error",
                 error="OpenShift authentication not initialized",
@@ -1041,7 +1061,7 @@ async def get_etcd_bottleneck_analysis(duration: str = "1h") -> ETCDBottleneckAn
             )
         
         # Initialize the deep drive analyzer
-        deep_drive_analyzer = etcdDeepDriveAnalyzer(ocp_auth, duration)
+        deep_drive_analyzer = etcdDeepDriveAnalyzer(auth_manager, duration)
         
         # Perform bottleneck analysis
         result = await deep_drive_analyzer.analyze_bottlenecks()
@@ -1121,8 +1141,8 @@ async def generate_etcd_performance_report(duration: str = "1h", input: Performa
         ETCDPerformanceReportResponse: Comprehensive performance analysis results and formatted report including critical metrics analysis, performance summary, baseline comparison, prioritized recommendations, and executive-ready documentation
     """
     try:
-        global ocp_auth
-        if not ocp_auth:
+        global auth_manager
+        if not auth_manager:
             return ETCDPerformanceReportResponse(
                 status="error",
                 error="OpenShift authentication not initialized",
@@ -1154,7 +1174,7 @@ async def generate_etcd_performance_report(duration: str = "1h", input: Performa
             test_id = f"perf-report-{datetime.now(pytz.UTC).strftime('%Y%m%d-%H%M%S')}"
         
         # Initialize the deep drive analyzer to collect metrics
-        deep_drive_analyzer = etcdDeepDriveAnalyzer(ocp_auth, eff_duration)
+        deep_drive_analyzer = etcdDeepDriveAnalyzer(auth_manager, eff_duration)
         
         # Collect comprehensive metrics for analysis
         metrics_result = await deep_drive_analyzer.analyze_performance_deep_drive()
@@ -1178,11 +1198,11 @@ async def generate_etcd_performance_report(duration: str = "1h", input: Performa
             if not node_usage_collector:
                 # Lazy init like get_etcd_node_usage
                 prometheus_config_local = {
-                    'url': ocp_auth.prometheus_url,
-                    'token': getattr(ocp_auth, 'prometheus_token', None),
+                    'url': auth_manager.prometheus_url,
+                    'token': getattr(auth_manager, 'prometheus_token', None),
                     'verify_ssl': False,
                 }
-                node_usage_collector = nodeUsageCollector(ocp_auth, prometheus_config_local)
+                node_usage_collector = nodeUsageCollector(auth_manager, prometheus_config_local)
             node_usage_result = await node_usage_collector.collect_all_metrics(eff_duration)
             node_usage_wrapped = {
                 'status': node_usage_result.get('status', 'unknown'),
