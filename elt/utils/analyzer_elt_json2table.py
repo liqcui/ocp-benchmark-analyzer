@@ -179,7 +179,7 @@ class GenericELT(utilityELT):
                     if any('network_l1' in str(k) for k in metrics.keys()):
                         return True
         return False
-         
+
     # ============================================================================
     # MAIN PROCESSING PIPELINE
     # ============================================================================
@@ -223,14 +223,24 @@ class GenericELT(utilityELT):
             # Extract nested data if needed
             actual_data = self._extract_actual_data(data, data_type)
             
-            # Use handler's methods
-            structured_data = handler.extract_cluster_info(actual_data) if hasattr(handler, 'extract_cluster_info') else {}
+            # Use handler's methods with appropriate method names
+            if data_type == 'cluster_info':
+                structured_data = handler.extract_cluster_info(actual_data) if hasattr(handler, 'extract_cluster_info') else {}
+                summary_method = 'summarize_cluster_info'
+            elif data_type == 'network_l1':
+                structured_data = handler.extract_network_l1(actual_data) if hasattr(handler, 'extract_network_l1') else {}
+                summary_method = 'summarize_network_l1'
+            else:
+                # Generic fallback
+                structured_data = handler.extract_cluster_info(actual_data) if hasattr(handler, 'extract_cluster_info') else {}
+                summary_method = 'summarize_cluster_info'
+            
             dataframes = handler.transform_to_dataframes(structured_data) if hasattr(handler, 'transform_to_dataframes') else {}
             html_tables = handler.generate_html_tables(dataframes) if hasattr(handler, 'generate_html_tables') else {}
             
             # Generate summary
-            if hasattr(handler, 'summarize_cluster_info'):
-                summary = handler.summarize_cluster_info(structured_data)
+            if hasattr(handler, summary_method):
+                summary = getattr(handler, summary_method)(structured_data)
             else:
                 summary = self._generate_generic_summary(structured_data, data_type)
             
@@ -247,7 +257,7 @@ class GenericELT(utilityELT):
         except Exception as e:
             logger.error(f"Error in handler processing: {e}")
             return self._error_response(str(e))
-    
+
     def _extract_actual_data(self, data: Dict[str, Any], data_type: str) -> Dict[str, Any]:
         """Extract actual data from nested structures"""
         # Handle common nesting patterns
@@ -256,6 +266,15 @@ class GenericELT(utilityELT):
                 return data['result']['data']
             elif 'data' in data and isinstance(data.get('data'), dict):
                 return data['data']
+        
+        # Unwrap typical wrappers for network_l1 as well
+        if data_type == 'network_l1':
+            # Many tool responses wrap actual payload under top-level 'data'
+            if 'data' in data and isinstance(data.get('data'), dict):
+                return data['data']
+            # Some responses may nest under 'result' → 'data'
+            if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
+                return data['result']['data']
         
         return data
     

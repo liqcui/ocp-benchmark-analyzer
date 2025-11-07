@@ -43,8 +43,13 @@ class networkL1ELT(utilityELT):
             }
         }
     
-    def extract_cluster_info(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def extract_network_l1(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Extract network L1 information from network_l1.py output"""
+        
+        # Handle nested data structure - extract actual metrics data
+        actual_data = data
+        if 'data' in data and isinstance(data.get('data'), dict):
+            actual_data = data['data']
         
         structured = {
             'network_l1_overview': [],
@@ -58,7 +63,7 @@ class networkL1ELT(utilityELT):
             structured[f'network_mtu_{role}'] = []
             structured[f'arp_entries_{role}'] = []
         
-        node_groups = data.get('node_groups', {})
+        node_groups = actual_data.get('node_groups', {})
         
         # Extract metrics for each role
         for role in ['controlplane', 'infra', 'worker', 'workload']:
@@ -85,10 +90,67 @@ class networkL1ELT(utilityELT):
                     self._extract_arp_entries(metric_data, structured, role)
         
         # Generate overview
-        self._generate_overview(data, structured)
+        self._generate_overview(actual_data, structured)
         
         return structured
-    
+
+    def summarize_network_l1(self, data: Dict[str, Any]) -> str:
+        """Generate network L1 summary as HTML"""
+        try:
+            summary_items: List[str] = []
+            
+            overview_data = data.get('network_l1_overview', [])
+            
+            # Fallback: synthesize overview if missing but role tables exist
+            if not overview_data:
+                roles = ['controlplane', 'infra', 'worker', 'workload']
+                metric_prefixes = [
+                    'network_up_status', 'traffic_carrier', 'network_speed', 'network_mtu', 'arp_entries'
+                ]
+                synthesized: List[Dict[str, Any]] = []
+                for role in roles:
+                    role_tables = [f"{p}_{role}" for p in metric_prefixes]
+                    non_empty_tables = [
+                        t for t in role_tables
+                        if isinstance(data.get(t), list) and len(data.get(t)) > 0
+                    ]
+                    if not non_empty_tables:
+                        continue
+                    # Derive node count from the first available role table
+                    first_table = data.get(non_empty_tables[0], [])
+                    unique_nodes = {str(row.get('Node')) for row in first_table if isinstance(row, dict) and 'Node' in row}
+                    synthesized.append({
+                        'Role': role.title(),
+                        'Nodes': len(unique_nodes),
+                        'Metrics Collected': len(non_empty_tables),
+                        'Status': self.create_status_badge('success', 'Active')
+                    })
+                if synthesized:
+                    overview_data = synthesized
+            
+            total_nodes = sum(int(item.get('Nodes', 0)) for item in overview_data)
+            if total_nodes > 0:
+                summary_items.append(f"<li>Total Nodes: {total_nodes}</li>")
+            
+            # Role breakdown
+            for item in overview_data:
+                role = item.get('Role', 'Unknown')
+                nodes = item.get('Nodes', 0)
+                metrics = item.get('Metrics Collected', 0)
+                if nodes > 0:
+                    summary_items.append(f"<li>{role}: {nodes} nodes, {metrics} metrics</li>")
+            
+            return (
+                "<div class=\"network-l1-summary\">"
+                "<h4>Network L1 Metrics Summary:</h4>"
+                "<ul>" + "".join(summary_items) + "</ul>"
+                "</div>"
+            )
+        
+        except Exception as e:
+            logger.error(f"Failed to generate network L1 summary: {e}")
+            return f"Network L1 metrics collected from {len(data)} role groups"
+
     def _extract_network_up_status(self, metric_data: Dict[str, Any], 
                                    structured: Dict[str, Any], role: str):
         """Extract network up status for a role"""
@@ -267,37 +329,7 @@ class networkL1ELT(utilityELT):
                     'Metrics Collected': metrics_count,
                     'Status': self.create_status_badge('success', 'Active')
                 })
-    
-    def summarize_cluster_info(self, data: Dict[str, Any]) -> str:
-        """Generate network L1 summary as HTML"""
-        try:
-            summary_items: List[str] = []
-            
-            overview_data = data.get('network_l1_overview', [])
-            
-            total_nodes = sum(int(item.get('Nodes', 0)) for item in overview_data)
-            if total_nodes > 0:
-                summary_items.append(f"<li>Total Nodes: {total_nodes}</li>")
-            
-            # Role breakdown
-            for item in overview_data:
-                role = item.get('Role', 'Unknown')
-                nodes = item.get('Nodes', 0)
-                metrics = item.get('Metrics Collected', 0)
-                if nodes > 0:
-                    summary_items.append(f"<li>{role}: {nodes} nodes, {metrics} metrics</li>")
-            
-            return (
-                "<div class=\"network-l1-summary\">"
-                "<h4>Network L1 Metrics Summary:</h4>"
-                "<ul>" + "".join(summary_items) + "</ul>"
-                "</div>"
-            )
-        
-        except Exception as e:
-            logger.error(f"Failed to generate network L1 summary: {e}")
-            return f"Network L1 metrics collected from {len(data)} role groups"
-    
+      
     def transform_to_dataframes(self, structured_data: Dict[str, Any]) -> Dict[str, pd.DataFrame]:
         """Transform structured data into pandas DataFrames"""
         dataframes = {}
