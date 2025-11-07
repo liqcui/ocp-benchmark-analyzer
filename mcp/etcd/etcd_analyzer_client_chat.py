@@ -32,7 +32,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
 from langgraph.checkpoint.memory import MemorySaver
 from dotenv import load_dotenv
-from elt.etcd.etcd_analyzer_elt_json2table import json_to_html_table
+from elt.utils.analyzer_elt_json2table import convert_json_to_html_table
 
 import warnings
 warnings.filterwarnings(
@@ -193,7 +193,7 @@ class MCPClient:
                                 if tool_name in ["get_server_health"]:
                                     return json_data
                                 else:
-                                    return json_to_html_table(json_data)
+                                    return convert_json_to_html_table(json_data)
                                     # return json_data
                             else:
                                 return content_text
