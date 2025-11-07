@@ -7,7 +7,7 @@ import logging
 from typing import Dict, Any, List, Optional, Union
 import pandas as pd
 from datetime import datetime
-from .etcd_analyzer_elt_utility import utilityELT
+from ..utils.analyzer_elt_utility import utilityELT
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ class etcdClusterStatusELT(utilityELT):
         for endpoint in endpoints:
             # Parse DB size for comparison
             db_size_raw = endpoint.get('db_size', '0 MB')
-            db_size_mb = self._parse_db_size(db_size_raw)
+            db_size_mb = self.parse_db_size(db_size_raw)
             db_sizes.append(db_size_mb)
             
             processed_endpoints.append({
@@ -122,21 +122,6 @@ class etcdClusterStatusELT(utilityELT):
             'endpoints_summary': metrics.get('endpoints_summary', [])
         }
     
-    def _parse_db_size(self, size_str: str) -> float:
-        """Parse database size string to MB"""
-        try:
-            size_str = size_str.upper().strip()
-            if 'MB' in size_str:
-                return float(size_str.replace('MB', '').strip())
-            elif 'GB' in size_str:
-                return float(size_str.replace('GB', '').strip()) * 1024
-            elif 'KB' in size_str:
-                return float(size_str.replace('KB', '').strip()) / 1024
-            else:
-                return 0.0
-        except (ValueError, AttributeError):
-            return 0.0
-    
     def transform_to_dataframes(self, structured_data: Dict[str, Any]) -> Dict[str, pd.DataFrame]:
         """Transform structured data into pandas DataFrames"""
         try:
@@ -152,7 +137,13 @@ class etcdClusterStatusELT(utilityELT):
                 {'Property': 'Leader Present', 'Value': 'Yes' if structured_data.get('leader_info', {}).get('has_leader') else 'No'},
                 {'Property': 'Total DB Size', 'Value': self._format_db_size(structured_data.get('cluster_metrics', {}).get('total_db_size_mb', 0))}
             ]
-            dataframes['cluster_overview'] = pd.DataFrame(overview_data)
+            # Build and unicode-decode overview DataFrame similar to networkL1ELT
+            df_overview = pd.DataFrame(overview_data)
+            if not df_overview.empty:
+                for col in df_overview.columns:
+                    if df_overview[col].dtype == 'object':
+                        df_overview[col] = df_overview[col].astype(str).apply(self.decode_unicode_escapes)
+            dataframes['cluster_overview'] = df_overview
             
             # Endpoint Status Table (main table similar to etcdctl output)
             endpoint_data = structured_data.get('endpoint_status', {})
@@ -185,7 +176,12 @@ class etcdClusterStatusELT(utilityELT):
                         'Raft Index': endpoint.get('raft_index', '')
                     })
                 
-                dataframes['endpoint_status'] = pd.DataFrame(endpoint_rows)
+                df_endpoints = pd.DataFrame(endpoint_rows)
+                if not df_endpoints.empty:
+                    for col in df_endpoints.columns:
+                        if df_endpoints[col].dtype == 'object':
+                            df_endpoints[col] = df_endpoints[col].astype(str).apply(self.decode_unicode_escapes)
+                dataframes['endpoint_status'] = df_endpoints
             
             # Cluster Health Details
             health_data = structured_data.get('cluster_health', {})
@@ -206,7 +202,12 @@ class etcdClusterStatusELT(utilityELT):
                         'Type': 'Unhealthy'
                     })
                 
-                dataframes['health_status'] = pd.DataFrame(health_rows)
+                df_health = pd.DataFrame(health_rows)
+                if not df_health.empty:
+                    for col in df_health.columns:
+                        if df_health[col].dtype == 'object':
+                            df_health[col] = df_health[col].astype(str).apply(self.decode_unicode_escapes)
+                dataframes['health_status'] = df_health
             
             # Member Information
             member_data = structured_data.get('member_status', {})
@@ -223,7 +224,12 @@ class etcdClusterStatusELT(utilityELT):
                         'Peer URLs': len(member.get('peer_urls', []))
                     })
                 
-                dataframes['member_details'] = pd.DataFrame(member_rows)
+                df_members = pd.DataFrame(member_rows)
+                if not df_members.empty:
+                    for col in df_members.columns:
+                        if df_members[col].dtype == 'object':
+                            df_members[col] = df_members[col].astype(str).apply(self.decode_unicode_escapes)
+                dataframes['member_details'] = df_members
             
             # Cluster Metrics Summary
             metrics_data = structured_data.get('cluster_metrics', {})
@@ -234,7 +240,12 @@ class etcdClusterStatusELT(utilityELT):
                     {'Metric': 'Leader Count', 'Value': metrics_data.get('leader_count', 0)},
                     {'Metric': 'Total DB Size', 'Value': self._format_db_size(metrics_data.get('total_db_size_mb', 0))}
                 ]
-                dataframes['metrics_summary'] = pd.DataFrame(metrics_rows)
+                df_metrics = pd.DataFrame(metrics_rows)
+                if not df_metrics.empty:
+                    for col in df_metrics.columns:
+                        if df_metrics[col].dtype == 'object':
+                            df_metrics[col] = df_metrics[col].astype(str).apply(self.decode_unicode_escapes)
+                dataframes['metrics_summary'] = df_metrics
             
             return dataframes
             
