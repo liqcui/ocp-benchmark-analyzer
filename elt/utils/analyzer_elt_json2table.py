@@ -10,7 +10,7 @@ import json
 import pandas as pd
 from datetime import datetime
 
-from .etcd_analyzer_elt_utility import utilityELT
+from .analyzer_elt_utility import utilityELT
 
 logger = logging.getLogger(__name__)
 
