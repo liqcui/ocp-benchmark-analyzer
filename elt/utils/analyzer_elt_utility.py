@@ -1,0 +1,694 @@
+"""
+Utility functions for ETCD Analyzer ELT modules
+Pure utility functions for formatting, HTML generation, and data processing
+NO metric-specific logic - only reusable utilities
+"""
+
+import logging
+import re
+from typing import Dict, Any, List, Union, Tuple
+import pandas as pd
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+
+class utilityELT:
+    """Pure utility functions for ELT modules - no metric-specific logic"""
+    
+    def __init__(self):
+        self.max_columns = 6
+    
+    # ============================================================================
+    # TEXT FORMATTING UTILITIES
+    # ============================================================================
+    
+    def truncate_text(self, text: str, max_length: int = 30, suffix: str = '...') -> str:
+        """Truncate text for display"""
+        if not text:
+            return text
+        if len(text) <= max_length:
+            return text
+        return text[:max_length-len(suffix)] + suffix
+    
+    def truncate_url(self, url: str, max_length: int = 50) -> str:
+        """Truncate URL for display"""
+        return self.truncate_text(url, max_length)
+    
+    def truncate_node_name(self, name: str, max_length: int = 25) -> str:
+        """Truncate node name for display"""
+        return self.truncate_text(name, max_length)
+    
+    def truncate_kernel_version(self, kernel_ver: str, max_length: int = 30) -> str:
+        """Truncate kernel version for display"""
+        return self.truncate_text(kernel_ver, max_length)
+    
+    def truncate_runtime(self, runtime: str, max_length: int = 25) -> str:
+        """Truncate container runtime for display"""
+        if not runtime or len(runtime) <= max_length:
+            return runtime
+        # Try to keep the version part
+        if '://' in runtime:
+            protocol, version = runtime.split('://', 1)
+            return f"{protocol}://{version[:max_length-len(protocol)-6]}..."
+        return runtime[:max_length-3] + '...'
+    
+    # ============================================================================
+    # CAPACITY PARSING UTILITIES
+    # ============================================================================
+    
+    def parse_cpu_capacity(self, cpu_str: str) -> int:
+        """Parse CPU capacity string to integer cores"""
+        try:
+            if not cpu_str:
+                return 0
+            cpu_str = str(cpu_str).strip()
+            # Handle formats like "32", "32000m"
+            if cpu_str.endswith('m'):
+                return int(cpu_str[:-1]) // 1000
+            return int(float(cpu_str))
+        except (ValueError, TypeError, AttributeError):
+            return 0
+    
+    def parse_memory_capacity(self, memory_str: str) -> float:
+        """Parse memory capacity string to GB"""
+        try:
+            if not memory_str:
+                return 0.0
+            memory_str = str(memory_str).strip()
+            
+            if memory_str.endswith('Ki'):
+                # Convert KiB to GB
+                kib = int(memory_str[:-2])
+                return kib / (1024 * 1024)
+            elif memory_str.endswith('Mi'):
+                # Convert MiB to GB  
+                mib = int(memory_str[:-2])
+                return mib / 1024
+            elif memory_str.endswith('Gi'):
+                # Already in GiB, close enough to GB
+                return float(memory_str[:-2])
+            elif memory_str.endswith('G') or memory_str.endswith('GB'):
+                return float(memory_str.rstrip('GB').strip())
+            elif memory_str.endswith('M') or memory_str.endswith('MB'):
+                return float(memory_str.rstrip('MB').strip()) / 1024
+            else:
+                # Assume it's in bytes, convert to GB
+                return int(float(memory_str)) / (1024**3)
+        except (ValueError, TypeError, AttributeError):
+            return 0.0
+    
+    def parse_db_size(self, size_str: str) -> float:
+        """Parse database size string to MB"""
+        try:
+            if not size_str:
+                return 0.0
+            size_str = str(size_str).upper().strip()
+            
+            if 'MB' in size_str:
+                return float(size_str.replace('MB', '').strip())
+            elif 'GB' in size_str:
+                return float(size_str.replace('GB', '').strip()) * 1024
+            elif 'KB' in size_str:
+                return float(size_str.replace('KB', '').strip()) / 1024
+            else:
+                # Try to parse as number (assume MB)
+                return float(size_str)
+        except (ValueError, AttributeError, TypeError):
+            return 0.0
+    
+    # ============================================================================
+    # TIMESTAMP FORMATTING
+    # ============================================================================
+    
+    def format_timestamp(self, timestamp_str: str, length: int = 19) -> str:
+        """Format timestamp for display"""
+        if not timestamp_str:
+            return 'Unknown'
+        timestamp_str = str(timestamp_str)
+        return timestamp_str[:length]
+    
+    # ============================================================================
+    # HTML UTILITIES
+    # ============================================================================
+    
+    def clean_html(self, html: str) -> str:
+        """Clean up HTML (remove newlines and extra whitespace)"""
+        if not html:
+            return html
+        html = re.sub(r'\s+', ' ', html.replace('\n', ' ').replace('\r', ''))
+        return html.strip()
+    
+    def decode_unicode_escapes(self, text: str) -> str:
+        """Decode Unicode escape sequences to actual Unicode characters"""
+        try:
+            if not text or not isinstance(text, str):
+                return str(text) if text is not None else ''
+            
+            original = text
+            
+            # Handle standard Unicode escapes like \u26a0
+            try:
+                text = text.encode('utf-8').decode('unicode_escape')
+            except (UnicodeDecodeError, UnicodeError):
+                pass
+            
+            # Common Unicode replacements
+            replacements = {
+                "\\u26a0\\ufe0f": "⚠️",
+                "\\u26a0": "⚠",
+                "\\u2022": "•",
+                "\\u2713": "✓",
+                "\\u2717": "✗",
+                "\\u27a1": "➡",
+                "\\u2b06": "⬆",
+                "\\u2b07": "⬇",
+                "\\u1f3c6": "🏆",
+                "\\u1f4ca": "📊",
+                "\\u1f4c8": "📈",
+                "\\u1f4c9": "📉",
+                "\\u1f534": "🔴",
+                "\\u1f7e1": "🟡",
+                "\\u1f7e2": "🟢",
+                "\\ufe0f": "",
+            }
+            
+            for escape_seq, replacement in replacements.items():
+                text = text.replace(escape_seq, replacement)
+            
+            # Fix common UTF-8 mojibake sequences
+            try:
+                if any(marker in text for marker in ["Ã", "â€", "Â"]):
+                    text = text.encode('latin1', errors='ignore').decode('utf-8', errors='ignore')
+            except (UnicodeDecodeError, UnicodeError):
+                pass
+            
+            return text
+            
+        except Exception as e:
+            logger.warning(f"Failed to decode Unicode escapes: {e}")
+            return str(text) if text is not None else ''
+    
+    def create_status_badge(self, status: str, value: str = None) -> str:
+        """Create HTML badge for status with optional value"""
+        badge_colors = {
+            'success': 'success',
+            'warning': 'warning',
+            'danger': 'danger',
+            'info': 'info',
+            'critical': 'danger',
+            'high': 'warning',
+            'medium': 'info',
+            'low': 'success',
+            'normal': 'success'
+        }
+        
+        color = badge_colors.get(str(status).lower(), 'secondary')
+        display_text = value if value else str(status).title()
+        return f'<span class="badge badge-{color}">{display_text}</span>'
+    
+    def create_leader_badge(self, is_leader: bool) -> str:
+        """Create HTML badge for leader status"""
+        if is_leader:
+            return '<span class="badge badge-success">LEADER</span>'
+        else:
+            return '<span class="text-muted">false</span>'
+    
+    # ============================================================================
+    # VALUE HIGHLIGHTING WITH TOP 1 AND CRITICAL THRESHOLDS
+    # ============================================================================
+    
+    def highlight_critical_values(self, value: Union[float, int], 
+                                  thresholds: Dict[str, float], 
+                                  unit: str = "", 
+                                  is_top: bool = False) -> str:
+        """
+        Highlight critical values with color coding and top 1 indicator
+        
+        Args:
+            value: The numeric value to format
+            thresholds: Dict with 'critical' and 'warning' keys
+            unit: Unit to append (e.g., ' GB', ' MB/s')
+            is_top: True if this is the top 1 value in the dataset
+            
+        Returns:
+            HTML formatted string with appropriate highlighting
+        """
+        try:
+            value = float(value) if value is not None else 0
+        except (ValueError, TypeError):
+            return str(value) + unit
+        
+        critical = thresholds.get('critical', float('inf'))
+        warning = thresholds.get('warning', float('inf'))
+        
+        # Top 1 highlighting - blue background with trophy
+        if is_top and value > 0:
+            return f'<span class="text-primary font-weight-bold bg-light px-1">🏆 {value}{unit}</span>'
+        
+        # Critical highlighting - red with warning
+        elif value >= critical:
+            return f'<span class="text-danger font-weight-bold">⚠️ {value}{unit}</span>'
+        
+        # Warning highlighting - orange/yellow
+        elif value >= warning:
+            return f'<span class="text-warning font-weight-bold">{value}{unit}</span>'
+        
+        # Normal value
+        else:
+            return f'{value}{unit}'
+    
+    def extract_numeric_value(self, value_str: str) -> float:
+        """Extract numeric value from formatted string (e.g., remove HTML tags)"""
+        try:
+            if isinstance(value_str, (int, float)):
+                return float(value_str)
+            
+            if not value_str:
+                return 0.0
+            
+            # Remove HTML tags first
+            clean_str = re.sub(r'<[^>]+>', '', str(value_str))
+            
+            # Remove emoji and special characters
+            clean_str = re.sub(r'[🏆⚠️✓✗➡⬆⬇]', '', clean_str)
+            
+            # Extract first number from string
+            numbers = re.findall(r'[\d.]+', clean_str)
+            if numbers:
+                return float(numbers[0])
+            return 0.0
+        except (ValueError, TypeError):
+            return 0.0
+    
+    # ============================================================================
+    # DATAFRAME UTILITIES
+    # ============================================================================
+    
+    def limit_dataframe_columns(self, df: pd.DataFrame, max_cols: int = None, 
+                               table_name: str = None) -> pd.DataFrame:
+        """Limit DataFrame columns to maximum number with intelligent selection"""
+        if max_cols is None:
+            max_cols = self.max_columns
+
+        if len(df.columns) <= max_cols:
+            return df
+        
+        # Priority columns - always keep if present
+        priority_cols = [
+            'name', 'status', 'value', 'count', 'property', 
+            'rank', 'node', 'type', 'ready', 'cpu', 'memory', 
+            'metric', 'pod', 'namespace', 'health'
+        ]
+        
+        # Find priority columns that exist in DataFrame
+        keep_cols = []
+        for col in df.columns:
+            col_lower = str(col).lower()
+            if any(priority in col_lower for priority in priority_cols):
+                keep_cols.append(col)
+                if len(keep_cols) >= max_cols:
+                    break
+        
+        # Add remaining columns up to limit
+        remaining_cols = [col for col in df.columns if col not in keep_cols]
+        while len(keep_cols) < max_cols and remaining_cols:
+            keep_cols.append(remaining_cols.pop(0))
+        
+        return df[keep_cols[:max_cols]]
+    
+    def create_html_table(self, df: pd.DataFrame, table_name: str) -> str:
+        """Generate HTML table from DataFrame with Unicode handling and styling"""
+        try:
+            if df is None or df.empty:
+                return ""
+            
+            # Create a copy to avoid modifying original
+            df_copy = df.copy()
+            
+            # Flatten MultiIndex columns if present
+            try:
+                if isinstance(df_copy.columns, pd.MultiIndex):
+                    df_copy.columns = [
+                        "_".join([str(part) for part in col if part is not None])
+                        for col in df_copy.columns.values
+                    ]
+                else:
+                    df_copy.columns = [str(c) for c in df_copy.columns]
+            except Exception as e:
+                logger.warning(f"Error flattening columns: {e}")
+                df_copy.columns = [str(c) for c in df_copy.columns]
+
+            # Apply Unicode decoding to object columns
+            try:
+                object_columns = list(df_copy.select_dtypes(include=['object']).columns)
+                for col in object_columns:
+                    df_copy[col] = df_copy[col].astype(str).apply(self.decode_unicode_escapes)
+            except Exception as e:
+                logger.warning(f"Error decoding unicode: {e}")
+            
+            # Create styled HTML table
+            html = df_copy.to_html(
+                index=False,
+                classes='table table-striped table-bordered table-sm',
+                escape=False,  # Don't escape HTML in cells (for badges, icons)
+                table_id=f"table-{table_name.replace('_', '-')}",
+                border=1
+            )
+            
+            # Additional cleanup
+            html = self.decode_unicode_escapes(html)
+            html = self.clean_html(html)
+            
+            # Add responsive wrapper
+            html = f'<div class="table-responsive">{html}</div>'
+            
+            return html
+            
+        except Exception as e:
+            logger.error(f"Failed to generate HTML table for {table_name}: {e}")
+            return f'<div class="alert alert-danger">Error generating table: {str(e)}</div>'
+    
+    # ============================================================================
+    # CALCULATION UTILITIES
+    # ============================================================================
+    
+    def calculate_totals_from_nodes(self, nodes: List[Dict[str, Any]]) -> Dict[str, Union[int, float]]:
+        """Calculate total CPU and memory from node list"""
+        if not nodes or not isinstance(nodes, list):
+            return {
+                'total_cpu': 0,
+                'total_memory_gb': 0.0,
+                'ready_count': 0,
+                'schedulable_count': 0,
+                'count': 0
+            }
+        
+        total_cpu = sum(
+            self.parse_cpu_capacity(node.get('cpu_capacity', '0')) 
+            for node in nodes if isinstance(node, dict)
+        )
+        
+        total_memory_gb = sum(
+            self.parse_memory_capacity(node.get('memory_capacity', '0Ki')) 
+            for node in nodes if isinstance(node, dict)
+        )
+        
+        ready_count = sum(
+            1 for node in nodes 
+            if isinstance(node, dict) and 'Ready' in str(node.get('ready_status', ''))
+        )
+        
+        schedulable_count = sum(
+            1 for node in nodes 
+            if isinstance(node, dict) and node.get('schedulable', False)
+        )
+        
+        return {
+            'total_cpu': total_cpu,
+            'total_memory_gb': total_memory_gb,
+            'ready_count': ready_count,
+            'schedulable_count': schedulable_count,
+            'count': len([n for n in nodes if isinstance(n, dict)])
+        }
+    
+    def identify_top_values(self, data: List[Dict[str, Any]], value_key: str) -> List[int]:
+        """
+        Identify indices of top values for highlighting
+        Returns list with index of top 1 value
+        """
+        try:
+            if not data or not isinstance(data, list):
+                return []
+            
+            values = []
+            for i, item in enumerate(data):
+                if isinstance(item, dict):
+                    try:
+                        val = float(item.get(value_key, 0))
+                        values.append((i, val))
+                    except (ValueError, TypeError):
+                        continue
+            
+            if not values:
+                return []
+            
+            values.sort(key=lambda x: x[1], reverse=True)
+            
+            # Return index of top 1
+            return [values[0][0]] if values and values[0][1] > 0 else []
+            
+        except (ValueError, TypeError, AttributeError):
+            return []
+    
+    # ============================================================================
+    # CATEGORIZATION UTILITIES
+    # ============================================================================
+    
+    def categorize_resource_type(self, resource_name: str) -> str:
+        """Categorize resource type for better organization"""
+        if not resource_name:
+            return 'Other'
+        
+        resource_lower = str(resource_name).lower()
+        
+        if any(keyword in resource_lower for keyword in ['network', 'policy', 'egress', 'udn']):
+            return 'Network & Security'
+        elif any(keyword in resource_lower for keyword in ['config', 'secret']):
+            return 'Configuration'
+        elif any(keyword in resource_lower for keyword in ['pod', 'service']):
+            return 'Workloads'
+        elif any(keyword in resource_lower for keyword in ['namespace']):
+            return 'Organization'
+        else:
+            return 'Other'
+    
+    # ============================================================================
+    # SAFE VALUE GETTERS
+    # ============================================================================
+    
+    def _safe_int_get(self, data: Dict[str, Any], key: str, default: int = 0) -> int:
+        """Safely get integer value from dictionary"""
+        try:
+            if not isinstance(data, dict):
+                return default
+            value = data.get(key, default)
+            if value is None:
+                return default
+            return int(float(value))
+        except (ValueError, TypeError, AttributeError):
+            return default
+    
+    def _safe_float_get(self, data: Dict[str, Any], key: str, default: float = 0.0) -> float:
+        """Safely get float value from dictionary"""
+        try:
+            if not isinstance(data, dict):
+                return default
+            value = data.get(key, default)
+            if value is None:
+                return default
+            return float(value)
+        except (ValueError, TypeError, AttributeError):
+            return default
+    
+    def _safe_str_get(self, data: Dict[str, Any], key: str, default: str = '') -> str:
+        """Safely get string value from dictionary"""
+        try:
+            if not isinstance(data, dict):
+                return default
+            value = data.get(key, default)
+            return str(value) if value is not None else default
+        except (ValueError, TypeError, AttributeError):
+            return default
+    
+    # ============================================================================
+    # DISPLAY FORMATTING
+    # ============================================================================
+    
+    def format_memory_display(self, memory_str: str) -> str:
+        """Format memory for display"""
+        try:
+            gb_value = self.parse_memory_capacity(memory_str)
+            if gb_value >= 1:
+                return f"{gb_value:.0f} GB"
+            else:
+                return f"{gb_value * 1024:.0f} MB"
+        except:
+            return str(memory_str) if memory_str else "0 MB"
+    
+    def format_count_value(self, count: Union[int, float]) -> str:
+        """Format count values with appropriate scaling (K, M)"""
+        try:
+            count = int(float(count))
+            if count > 1000000:
+                return f"{count/1000000:.1f}M"
+            elif count > 1000:
+                return f"{count/1000:.1f}K"
+            else:
+                return f"{count:,}"
+        except (ValueError, TypeError):
+            return str(count)
+    
+    def format_percentage(self, value: float, precision: int = 1) -> str:
+        """Format percentage values"""
+        try:
+            return f"{float(value):.{precision}f}%"
+        except (ValueError, TypeError):
+            return str(value)
+    
+    def format_bytes_per_second(self, bytes_per_sec: float) -> str:
+        """Format bytes per second to readable units"""
+        try:
+            bytes_per_sec = float(bytes_per_sec)
+            if bytes_per_sec == 0:
+                return "0 B/s"
+            elif bytes_per_sec < 1024:
+                return f"{bytes_per_sec:.0f} B/s"
+            elif bytes_per_sec < 1024**2:
+                return f"{bytes_per_sec/1024:.1f} KB/s"
+            elif bytes_per_sec < 1024**3:
+                return f"{bytes_per_sec/(1024**2):.1f} MB/s"
+            else:
+                return f"{bytes_per_sec/(1024**3):.2f} GB/s"
+        except (ValueError, TypeError):
+            return str(bytes_per_sec)
+    
+    def format_operations_per_second(self, ops_per_sec: float) -> str:
+        """Format operations per second to readable units"""
+        try:
+            ops_per_sec = float(ops_per_sec)
+            if ops_per_sec == 0:
+                return "0 IOPS"
+            elif ops_per_sec < 1:
+                return f"{ops_per_sec:.3f} IOPS"
+            elif ops_per_sec < 1000:
+                return f"{ops_per_sec:.1f} IOPS"
+            else:
+                return f"{ops_per_sec/1000:.1f}K IOPS"
+        except (ValueError, TypeError):
+            return str(ops_per_sec)
+    
+    def format_duration_seconds(self, seconds: float) -> str:
+        """Format duration in seconds to readable format"""
+        try:
+            seconds = float(seconds)
+            if seconds < 0.001:
+                return f"{seconds*1000000:.0f} μs"
+            elif seconds < 1:
+                return f"{seconds*1000:.3f} ms"
+            elif seconds < 60:
+                return f"{seconds:.3f} s"
+            else:
+                return f"{seconds/60:.1f} min"
+        except (ValueError, TypeError):
+            return str(seconds)
+    
+    # ============================================================================
+    # PROPERTY-VALUE TABLE UTILITIES
+    # ============================================================================
+    
+    def create_property_value_table(self, data: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+        """Create a property-value table format"""
+        if not data or not isinstance(data, list):
+            return []
+        
+        result = []
+        for item in data:
+            if isinstance(item, dict):
+                result.append({
+                    'Property': str(item.get('Property', '')),
+                    'Value': str(item.get('Value', ''))
+                })
+        return result
+    
+    def flatten_dict(self, d: Dict[str, Any], parent_key: str = '', sep: str = '.') -> Dict[str, Any]:
+        """Flatten nested dictionary for display"""
+        items = []
+        
+        if not isinstance(d, dict):
+            return {parent_key: d} if parent_key else {}
+        
+        for k, v in d.items():
+            new_key = f"{parent_key}{sep}{k}" if parent_key else k
+            
+            if isinstance(v, dict):
+                # Only flatten small dicts
+                if len(str(v)) < 200:
+                    items.extend(self.flatten_dict(v, new_key, sep=sep).items())
+                else:
+                    items.append((new_key, f"Dict({len(v)} keys)"))
+            elif isinstance(v, list):
+                # Handle small lists
+                if len(v) < 10 and all(isinstance(item, (str, int, float)) for item in v):
+                    items.append((new_key, ', '.join(map(str, v))))
+                else:
+                    items.append((new_key, f"List({len(v)} items)"))
+            else:
+                items.append((new_key, v))
+        
+        return dict(items)
+    
+    # ============================================================================
+    # THRESHOLD UTILITIES
+    # ============================================================================
+    
+    def get_default_thresholds(self, metric_name: str) -> Dict[str, float]:
+        """Get default thresholds for common metrics"""
+        metric_lower = str(metric_name).lower()
+        
+        # CPU thresholds
+        if 'cpu' in metric_lower:
+            return {'warning': 70.0, 'critical': 85.0}
+        
+        # Memory thresholds
+        elif 'memory' in metric_lower or 'ram' in metric_lower:
+            return {'warning': 70.0, 'critical': 85.0}
+        
+        # Disk space thresholds
+        elif 'disk' in metric_lower and 'space' in metric_lower:
+            return {'warning': 70.0, 'critical': 85.0}
+        
+        # Latency thresholds (ms)
+        elif 'latency' in metric_lower or 'duration' in metric_lower:
+            return {'warning': 50.0, 'critical': 100.0}
+        
+        # IOPS thresholds
+        elif 'iops' in metric_lower:
+            return {'warning': 1000.0, 'critical': 5000.0}
+        
+        # Throughput thresholds (MB/s)
+        elif 'throughput' in metric_lower:
+            return {'warning': 100.0, 'critical': 500.0}
+        
+        # Default thresholds
+        else:
+            return {'warning': 70.0, 'critical': 90.0}
+    
+    # ============================================================================
+    # ERROR HANDLING UTILITIES
+    # ============================================================================
+    
+    def safe_divide(self, numerator: Union[int, float], 
+                   denominator: Union[int, float], 
+                   default: float = 0.0) -> float:
+        """Safely divide two numbers, returning default on error"""
+        try:
+            num = float(numerator)
+            den = float(denominator)
+            if den == 0:
+                return default
+            return num / den
+        except (ValueError, TypeError, ZeroDivisionError):
+            return default
+    
+    def safe_percentage(self, part: Union[int, float], 
+                       total: Union[int, float], 
+                       precision: int = 1) -> str:
+        """Safely calculate percentage"""
+        try:
+            if float(total) == 0:
+                return "0%"
+            percentage = (float(part) / float(total)) * 100
+            return f"{percentage:.{precision}f}%"
+        except (ValueError, TypeError, ZeroDivisionError):
+            return "N/A"

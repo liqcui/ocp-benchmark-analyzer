@@ -36,6 +36,8 @@ class OpenShiftAuth:
         self.k8s_verify_ssl = None
         # K8s API CA certificate path if available
         self.k8s_ca_cert_path: Optional[str] = None
+        # Minimal cluster information cache for quick health checks
+        self.cluster_info: Dict[str, Any] = {}
         
     async def initialize(self) -> bool:
         """Initialize Kubernetes client and discover services"""
@@ -145,6 +147,12 @@ class OpenShiftAuth:
             else:
                 self.logger.error("Failed to discover Prometheus service")
                 return False
+            
+            # Best-effort populate minimal cluster info for consumers
+            try:
+                await self._update_basic_cluster_info()
+            except Exception as e:
+                self.logger.debug(f"Failed to populate basic cluster info: {e}")
                 
         except Exception as e:
             self.logger.error(f"Failed to initialize OCP authentication: {e}")
@@ -272,6 +280,41 @@ class OpenShiftAuth:
             self.logger.warning("No authentication token found - Prometheus access may fail")
         else:
             self.logger.info(f"Authentication token configured (length: {len(self.token)})")
+
+    async def _update_basic_cluster_info(self) -> None:
+        """Populate minimal cluster info used by health checks."""
+        try:
+            if not self.k8s_client:
+                return
+            v1 = client.CoreV1Api(self.k8s_client)
+            nodes = v1.list_node(limit=1)
+            # If the API returns fewer than requested, we still can count via full list
+            if hasattr(nodes, 'items') and nodes.items is not None and len(nodes.items) <= 1:
+                try:
+                    nodes_full = v1.list_node()
+                    node_count = len(getattr(nodes_full, 'items', []) or [])
+                except Exception:
+                    node_count = len(nodes.items or [])
+            else:
+                node_count = len(nodes.items or [])
+            self.cluster_info['node_count'] = node_count
+        except Exception as e:
+            # Non-fatal
+            self.logger.debug(f"Basic cluster info update failed: {e}")
+
+    async def test_kubeapi_connection(self) -> bool:
+        """Test basic connectivity to the Kubernetes API server."""
+        try:
+            if not self.k8s_client:
+                # Attempt to reuse existing config
+                k8s_conf = client.Configuration.get_default_copy()
+                self.k8s_client = client.ApiClient(configuration=k8s_conf)
+            v1 = client.CoreV1Api(self.k8s_client)
+            _ = v1.list_namespace(limit=1)
+            return True
+        except Exception as e:
+            self.logger.debug(f"Kubernetes API connection test failed: {e}")
+            return False
     
     async def _create_prometheus_sa_token(self) -> Optional[str]:
         """Create service account token for Prometheus access"""

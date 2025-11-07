@@ -1,0 +1,448 @@
+"""
+Generic ELT Orchestrator for ETCD Analyzer
+Provides plugin architecture for easy extension with new metric types
+All metric-specific logic is delegated to specialized ELT modules
+"""
+
+import logging
+from typing import Dict, Any, List, Optional, Union
+import json
+import pandas as pd
+from datetime import datetime
+
+from .etcd_analyzer_elt_utility import utilityELT
+
+logger = logging.getLogger(__name__)
+
+
+class MetricELTRegistry:
+    """Registry for metric-specific ELT modules"""
+    
+    def __init__(self):
+        self._handlers = {}
+        self._initialized = False
+    
+    def register(self, metric_type: str, elt_class, identifier_func=None):
+        """
+        Register a new metric type handler
+        
+        Args:
+            metric_type: Name of the metric type (e.g., 'cluster_info', 'disk_io')
+            elt_class: ELT class to handle this metric type
+            identifier_func: Optional function to identify if data matches this type
+        """
+        self._handlers[metric_type] = {
+            'class': elt_class,
+            'instance': None,  # Lazy initialization
+            'identifier': identifier_func
+        }
+    
+    def get_handler(self, metric_type: str):
+        """Get or create handler instance for metric type"""
+        if metric_type not in self._handlers:
+            return None
+        
+        handler_info = self._handlers[metric_type]
+        if handler_info['instance'] is None:
+            handler_info['instance'] = handler_info['class']()
+        
+        return handler_info['instance']
+    
+    def identify_metric_type(self, data: Dict[str, Any]) -> Optional[str]:
+        """Identify metric type from data structure"""
+        for metric_type, handler_info in self._handlers.items():
+            identifier = handler_info.get('identifier')
+            if identifier and identifier(data):
+                return metric_type
+        return None
+    
+    def list_registered_types(self) -> List[str]:
+        """List all registered metric types"""
+        return list(self._handlers.keys())
+
+
+# Global registry instance
+_registry = MetricELTRegistry()
+
+
+def register_metric_handler(metric_type: str, elt_class, identifier_func=None):
+    """
+    Decorator or function to register new metric handlers
+    
+    Example usage:
+        register_metric_handler('my_metric', MyMetricELT, lambda d: 'my_field' in d)
+    """
+    _registry.register(metric_type, elt_class, identifier_func)
+
+
+class GenericELT(utilityELT):
+    """
+    Generic ELT orchestrator that delegates to specialized handlers
+    This class should only contain orchestration logic, no metric-specific code
+    """
+    
+    def __init__(self):
+        super().__init__()
+        self.registry = _registry
+        self._ensure_handlers_registered()
+    
+    def _ensure_handlers_registered(self):
+        """Lazy initialization of metric handlers"""
+        if self.registry._initialized:
+            return
+        
+        # Import and register all metric handlers
+        try:
+            from .ocp.analyzer_elt_cluster_info import clusterInfoELT
+            register_metric_handler(
+                'cluster_info', 
+                clusterInfoELT,
+                self._is_cluster_info
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import cluster_info handler: {e}")
+        
+        # Add more handlers as needed - easy to extend
+        # Example for new metric:
+        # try:
+        #     from .metrics.analyzer_elt_disk_io import diskIOELT
+        #     register_metric_handler('disk_io', diskIOELT, self._is_disk_io)
+        # except ImportError:
+        #     pass
+        
+        self.registry._initialized = True
+    
+    # ============================================================================
+    # DATA TYPE IDENTIFICATION
+    # ============================================================================
+    
+    def identify_data_type(self, data: Dict[str, Any]) -> str:
+        """Identify the type of data from structure"""
+        # Try registered handlers first
+        metric_type = self.registry.identify_metric_type(data)
+        if metric_type:
+            return metric_type
+        
+        # Fallback to generic
+        return 'generic'
+    
+    @staticmethod
+    def _is_cluster_info(data: Dict[str, Any]) -> bool:
+        """Identify cluster info data"""
+        # Check for tool identifier
+        if 'tool' in data and data.get('tool') == 'get_ocp_cluster_info':
+            return True
+        
+        # Check nested structure
+        if 'result' in data and isinstance(data.get('result'), dict):
+            nested_data = data['result'].get('data', {})
+            if ('cluster_name' in nested_data and 'cluster_version' in nested_data and 
+                'master_nodes' in nested_data):
+                return True
+        
+        # Check data nested structure
+        if 'data' in data and isinstance(data.get('data'), dict):
+            nested_data = data['data']
+            if ('cluster_name' in nested_data and 'cluster_version' in nested_data and 
+                ('master_nodes' in nested_data or 'total_nodes' in nested_data)):
+                return True
+        
+        # Direct structure
+        if ('cluster_name' in data and 'cluster_version' in data and 
+            ('master_nodes' in data or 'total_nodes' in data)):
+            return True
+        
+        return False
+    
+    # ============================================================================
+    # MAIN PROCESSING PIPELINE
+    # ============================================================================
+    
+    def process_data(self, data: Union[Dict[str, Any], str]) -> Dict[str, Any]:
+        """
+        Main entry point for processing any metric data
+        Returns standardized result dictionary
+        """
+        try:
+            # Parse JSON if string
+            if isinstance(data, str):
+                try:
+                    data = json.loads(data)
+                except json.JSONDecodeError as e:
+                    return self._error_response(f"Invalid JSON: {e}")
+            
+            if not isinstance(data, dict):
+                return self._error_response("Input must be dictionary or JSON string")
+            
+            # Identify data type
+            data_type = self.identify_data_type(data)
+            
+            # Get appropriate handler
+            handler = self.registry.get_handler(data_type)
+            
+            if handler is None:
+                # No specific handler, use generic processing
+                return self._process_generic(data, data_type)
+            
+            # Delegate to specialized handler
+            return self._process_with_handler(data, data_type, handler)
+            
+        except Exception as e:
+            logger.error(f"Error processing data: {e}")
+            return self._error_response(str(e))
+    
+    def _process_with_handler(self, data: Dict[str, Any], data_type: str, handler) -> Dict[str, Any]:
+        """Process data using specialized handler"""
+        try:
+            # Extract nested data if needed
+            actual_data = self._extract_actual_data(data, data_type)
+            
+            # Use handler's methods
+            structured_data = handler.extract_cluster_info(actual_data) if hasattr(handler, 'extract_cluster_info') else {}
+            dataframes = handler.transform_to_dataframes(structured_data) if hasattr(handler, 'transform_to_dataframes') else {}
+            html_tables = handler.generate_html_tables(dataframes) if hasattr(handler, 'generate_html_tables') else {}
+            
+            # Generate summary
+            if hasattr(handler, 'summarize_cluster_info'):
+                summary = handler.summarize_cluster_info(structured_data)
+            else:
+                summary = self._generate_generic_summary(structured_data, data_type)
+            
+            return {
+                'success': True,
+                'data_type': data_type,
+                'summary': summary,
+                'html_tables': html_tables,
+                'dataframes': dataframes,
+                'structured_data': structured_data,
+                'timestamp': data.get('timestamp', data.get('collection_timestamp', datetime.now().isoformat()))
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in handler processing: {e}")
+            return self._error_response(str(e))
+    
+    def _extract_actual_data(self, data: Dict[str, Any], data_type: str) -> Dict[str, Any]:
+        """Extract actual data from nested structures"""
+        # Handle common nesting patterns
+        if data_type == 'cluster_info':
+            if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
+                return data['result']['data']
+            elif 'data' in data and isinstance(data.get('data'), dict):
+                return data['data']
+        
+        return data
+    
+    def _process_generic(self, data: Dict[str, Any], data_type: str) -> Dict[str, Any]:
+        """Generic processing for unknown data types"""
+        try:
+            structured_data = self._extract_generic_fields(data)
+            df = pd.DataFrame(structured_data)
+            
+            if not df.empty:
+                df = self.limit_dataframe_columns(df)
+            
+            html_table = self.create_html_table(df, 'generic_data') if not df.empty else ""
+            
+            return {
+                'success': True,
+                'data_type': 'generic',
+                'summary': f"Generic data with {len(structured_data)} fields",
+                'html_tables': {'generic_data': html_table} if html_table else {},
+                'dataframes': {'generic_data': df} if not df.empty else {},
+                'structured_data': structured_data,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            return self._error_response(f"Generic processing failed: {e}")
+    
+    def _extract_generic_fields(self, data: Dict[str, Any], max_fields: int = 20) -> List[Dict[str, Any]]:
+        """Extract important fields from generic data"""
+        fields = []
+        
+        priority_keys = [
+            'name', 'status', 'version', 'timestamp', 'count', 'total',
+            'health', 'error', 'message', 'value', 'metric', 'result'
+        ]
+        
+        # Add priority fields first
+        for key in priority_keys:
+            if key in data:
+                fields.append({
+                    'Property': key.replace('_', ' ').title(),
+                    'Value': self._format_generic_value(data[key])
+                })
+        
+        # Add remaining fields
+        remaining_keys = [k for k in data.keys() if k not in priority_keys]
+        for key in remaining_keys:
+            if len(fields) >= max_fields:
+                break
+            fields.append({
+                'Property': key.replace('_', ' ').title(),
+                'Value': self._format_generic_value(data[key])
+            })
+        
+        return fields
+    
+    def _format_generic_value(self, value: Any) -> str:
+        """Format value for generic display"""
+        if isinstance(value, dict):
+            return f"Dict({len(value)} keys)"
+        elif isinstance(value, list):
+            return f"List({len(value)} items)"
+        else:
+            value_str = str(value)
+            return value_str[:100] + '...' if len(value_str) > 100 else value_str
+    
+    def _generate_generic_summary(self, data: Dict[str, Any], data_type: str) -> str:
+        """Generate generic summary"""
+        summary_parts = [f"Data Type: {data_type.replace('_', ' ').title()}"]
+        
+        if isinstance(data, dict):
+            summary_parts.append(f"Sections: {len(data)}")
+            
+            # Count total items
+            total_items = sum(len(v) if isinstance(v, list) else 1 for v in data.values())
+            summary_parts.append(f"Total Items: {total_items}")
+        
+        return " | ".join(summary_parts)
+    
+    def _error_response(self, error_msg: str) -> Dict[str, Any]:
+        """Standard error response"""
+        return {
+            'success': False,
+            'error': error_msg,
+            'data_type': 'error',
+            'summary': f"Error: {error_msg}",
+            'html_tables': {},
+            'dataframes': {},
+            'structured_data': {}
+        }
+
+
+# ============================================================================
+# PUBLIC API FUNCTIONS
+# ============================================================================
+
+def convert_json_to_html_table(json_data: Union[Dict[str, Any], str], 
+                               compact: bool = True,
+                               two_column: bool = False) -> str:
+    """
+    Convert JSON data to HTML table format
+    
+    Args:
+        json_data: Dictionary or JSON string
+        compact: Use compact display mode
+        two_column: Limit to 2-column layout
+        
+    Returns:
+        HTML string with formatted tables
+    """
+    try:
+        elt = GenericELT()
+        result = elt.process_data(json_data)
+        
+        if not result.get('success'):
+            return f"<div class='alert alert-danger'>Error: {result.get('error')}</div>"
+        
+        # Build HTML output
+        output_parts = []
+        
+        # Data type badge
+        data_type = result.get('data_type', 'unknown')
+        if data_type != 'generic':
+            type_display = data_type.replace('_', ' ').title()
+            output_parts.append(
+                f"<div class='mb-3'>"
+                f"<span class='badge badge-info' style='font-size: 1.0rem; font-weight: 600'>"
+                f"{type_display}"
+                f"</span>"
+                f"</div>"
+            )
+        
+        # Summary
+        summary = result.get('summary', '')
+        if summary:
+            summary_decoded = elt.decode_unicode_escapes(str(summary))
+            if summary_decoded.strip().startswith('<'):
+                output_parts.append(f"<div class='alert alert-light'>{summary_decoded}</div>")
+            else:
+                def escape_html(s: str) -> str:
+                    return s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                
+                safe_summary = escape_html(summary_decoded)
+                output_parts.append(f"<div class='alert alert-light'>{safe_summary}</div>")
+        
+        # Tables
+        html_tables = result.get('html_tables', {})
+        for table_name, table_html in html_tables.items():
+            table_title = table_name.replace('_', ' ').title()
+            output_parts.append(f"<h5 class='mt-3'>{table_title}</h5>")
+            output_parts.append(table_html)
+        
+        final_html = ''.join(output_parts)
+        final_html = elt.decode_unicode_escapes(final_html)
+        
+        return final_html
+        
+    except Exception as e:
+        logger.error(f"Error in convert_json_to_html_table: {e}")
+        return f"<div class='alert alert-danger'>Error: {str(e)}</div>"
+
+
+def process_metric_data(metric_data: Union[Dict[str, Any], str], 
+                       metric_type: str = None) -> Dict[str, Any]:
+    """
+    Process metric data with optional type hint
+    
+    Args:
+        metric_data: Dictionary or JSON string containing metric data
+        metric_type: Optional type hint (will auto-detect if not provided)
+        
+    Returns:
+        Dictionary with processed results
+    """
+    elt = GenericELT()
+    return elt.process_data(metric_data)
+
+
+def extract_and_transform_results(results: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Legacy API compatibility function
+    Extract and transform tool results into tables and summaries
+    """
+    return process_metric_data(results)
+
+
+# ============================================================================
+# EXTENSION EXAMPLES
+# ============================================================================
+
+def register_new_metric_handler_example():
+    """
+    Example showing how to register a new metric handler
+    This would be called during module initialization
+    """
+    # Example: Register disk I/O handler
+    # from .metrics.analyzer_elt_disk_io import diskIOELT
+    # 
+    # def is_disk_io(data):
+    #     return (
+    #         'tool' in data and data.get('tool') == 'collect_disk_io_metrics'
+    #         or 'category' in data and data.get('category') == 'disk_io'
+    #     )
+    # 
+    # register_metric_handler('disk_io', diskIOELT, is_disk_io)
+    pass
+
+
+__all__ = [
+    'GenericELT',
+    'MetricELTRegistry',
+    'register_metric_handler',
+    'convert_json_to_html_table',
+    'process_metric_data',
+    'extract_and_transform_results',
+]

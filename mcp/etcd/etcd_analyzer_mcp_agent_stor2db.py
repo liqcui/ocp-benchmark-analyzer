@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ETCD Analyzer MCP Agent with LangGraph StateGraph and DuckDB ELT
-Updated version with General Info support
+Updated version with General Info support and proper time range handling
 """
 
 import asyncio
@@ -18,14 +18,32 @@ from langgraph.graph import StateGraph, END
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-from storage.etcd_analyzer_stor_cluster_info import ClusterInfoStoreELT
-from storage.etcd_analyzer_stor_disk_wal_fsync import DiskWalFsyncStorELT, print_wal_fsync_summary_tables
-from storage.etcd_analyzer_stor_utility import TimeRangeUtilityELT
-from storage.etcd_analyzer_stor_disk_io import DiskIOStorELT, print_disk_io_summary_tables
-from storage.etcd_analyzer_stor_network_io import NetworkIOStorELT, print_network_io_summary_tables
-from storage.etcd_analyzer_stor_backend_commit import BackendCommitStorELT, print_backend_commit_summary_tables
-from storage.etcd_analyzer_stor_compact_defrag import CompactDefragStorELT, print_compact_defrag_summary_tables
-from storage.etcd_analyzer_stor_general_info import GeneralInfoStorELT, print_general_info_summary_tables
+try:
+    from storage.etcd.etcd_analyzer_stor_cluster_info import ClusterInfoStoreELT
+    from storage.etcd.etcd_analyzer_stor_disk_wal_fsync import DiskWalFsyncStorELT, print_wal_fsync_summary_tables
+    from storage.etcd.etcd_analyzer_stor_utility import TimeRangeUtilityELT
+    from storage.etcd.etcd_analyzer_stor_disk_io import DiskIOStorELT, print_disk_io_summary_tables
+    from storage.etcd.etcd_analyzer_stor_network_io import NetworkIOStorELT, print_network_io_summary_tables
+    from storage.etcd.etcd_analyzer_stor_backend_commit import BackendCommitStorELT, print_backend_commit_summary_tables
+    from storage.etcd.etcd_analyzer_stor_compact_defrag import CompactDefragStorELT, print_compact_defrag_summary_tables
+    from storage.etcd.etcd_analyzer_stor_general_info import GeneralInfoStorELT, print_general_info_summary_tables
+except ModuleNotFoundError:
+    # Add project root to sys.path for script execution via absolute path
+    import os as _os, sys as _sys
+    _repo_root = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", ".."))
+    if _repo_root not in _sys.path:
+        _sys.path.insert(0, _repo_root)
+    # If another installed package named 'storage' was imported earlier, remove it to prefer local package
+    if 'storage' in _sys.modules:
+        del _sys.modules['storage']
+    from storage.etcd.etcd_analyzer_stor_cluster_info import ClusterInfoStoreELT
+    from storage.etcd.etcd_analyzer_stor_disk_wal_fsync import DiskWalFsyncStorELT, print_wal_fsync_summary_tables
+    from storage.etcd.etcd_analyzer_stor_utility import TimeRangeUtilityELT
+    from storage.etcd.etcd_analyzer_stor_disk_io import DiskIOStorELT, print_disk_io_summary_tables
+    from storage.etcd.etcd_analyzer_stor_network_io import NetworkIOStorELT, print_network_io_summary_tables
+    from storage.etcd.etcd_analyzer_stor_backend_commit import BackendCommitStorELT, print_backend_commit_summary_tables
+    from storage.etcd.etcd_analyzer_stor_compact_defrag import CompactDefragStorELT, print_compact_defrag_summary_tables
+    from storage.etcd.etcd_analyzer_stor_general_info import GeneralInfoStorELT, print_general_info_summary_tables
 
 # Set up logging
 logging.basicConfig(
@@ -45,8 +63,8 @@ class AgentState(TypedDict):
     network_io_data: Optional[Dict[str, Any]]
     backend_commit_data: Optional[Dict[str, Any]]
     compact_defrag_data: Optional[Dict[str, Any]]
-    general_info_data: Optional[Dict[str, Any]]  # Added general info data
-    duration: str
+    general_info_data: Optional[Dict[str, Any]]
+    duration: Optional[str]
     start_time: Optional[str]
     end_time: Optional[str]
     testing_id: str
@@ -56,7 +74,7 @@ class AgentState(TypedDict):
 
 class ETCDAnalyzerStorDBMCPAgent:
     """ETCD Analyzer Agent using LangGraph StateGraph and MCP integration with General Info support"""
-    def __init__(self, mcp_server_url: str = "http://localhost:8000", db_path: str = "etcd_analyzer.duckdb"):
+    def __init__(self, mcp_server_url: str = "http://localhost:8001", db_path: str = "etcd_analyzer.duckdb"):
         self.mcp_server_url = mcp_server_url
         self.db_path = db_path
         # Global run UUID for this agent instance; used as a single testing run ID
@@ -67,7 +85,7 @@ class ETCDAnalyzerStorDBMCPAgent:
         self.network_io_store = NetworkIOStorELT(db_path)
         self.backend_commit_store = BackendCommitStorELT(db_path)
         self.compact_defrag_store = CompactDefragStorELT(db_path)
-        self.general_info_store = GeneralInfoStorELT(db_path)  # Added general info store
+        self.general_info_store = GeneralInfoStorELT(db_path)
         self.graph = self._create_graph()
 
     def _create_graph(self) -> StateGraph:
@@ -77,7 +95,7 @@ class ETCDAnalyzerStorDBMCPAgent:
         # Add nodes
         workflow.add_node("initialize", self._initialize_node)
         workflow.add_node("collect_cluster_info", self._collect_cluster_info_node)
-        workflow.add_node("collect_general_info", self._collect_general_info_node)  # Added general info node
+        workflow.add_node("collect_general_info", self._collect_general_info_node)
         workflow.add_node("collect_wal_fsync", self._collect_wal_fsync_node)
         workflow.add_node("collect_disk_io", self._collect_disk_io_node)
         workflow.add_node("collect_network_io", self._collect_network_io_node)
@@ -93,12 +111,12 @@ class ETCDAnalyzerStorDBMCPAgent:
             self._should_handle_error,
             {
                 "error": "handle_error",
-                "continue": "collect_general_info"  # Updated flow
+                "continue": "collect_general_info"
             }
         )
         
         workflow.add_conditional_edges(
-            "collect_general_info",  # Added general info conditional edges
+            "collect_general_info",
             self._should_handle_error,
             {
                 "error": "handle_error",
@@ -164,6 +182,26 @@ class ETCDAnalyzerStorDBMCPAgent:
         """Check if there's an error to handle"""
         return "error" if state.get("error") else "continue"
     
+    def _build_time_params(self, state: AgentState) -> Dict[str, Any]:
+        """Build time parameters for MCP tool calls based on duration or time range"""
+        params = {}
+        
+        # If both start_time and end_time are provided, use time range
+        if state.get("start_time") and state.get("end_time"):
+            params["start_time"] = state["start_time"]
+            params["end_time"] = state["end_time"]
+            logger.info(f"Using time range: {state['start_time']} to {state['end_time']}")
+        # Otherwise use duration
+        elif state.get("duration"):
+            params["duration"] = state["duration"]
+            logger.info(f"Using duration: {state['duration']}")
+        else:
+            # Default to 1h if nothing specified
+            params["duration"] = "1h"
+            logger.info("Using default duration: 1h")
+        
+        return params
+    
     async def _initialize_node(self, state: AgentState) -> AgentState:
         """Initialize the agent state"""
         # Use a global testing UUID for the entire agent run. Allow override via query_params if provided.
@@ -187,15 +225,14 @@ class ETCDAnalyzerStorDBMCPAgent:
                         AIMessage(content=f"Time range validation failed: {validation['error']}")
                     ]
                 }
-            # Convert to duration format if time range is valid
-            duration = TimeRangeUtilityELT.format_duration_string(start_time, end_time) or duration
+            logger.info(f"Validated time range: {start_time} to {end_time}")
         
         logger.info(f"Initializing agent with testing_id (global run UUID): {testing_id}")
         
         return {
             **state,
             "testing_id": testing_id,
-            "duration": duration,
+            "duration": duration if not (start_time and end_time) else None,
             "start_time": start_time,
             "end_time": end_time,
             "cluster_info_data": {},
@@ -242,8 +279,8 @@ class ETCDAnalyzerStorDBMCPAgent:
         try:
             logger.info("Collecting general info metrics...")
             
-            general_info_params = {"duration": state["duration"]}
-            general_info_data = await self._call_mcp_tool("get_etcd_general_info", general_info_params)
+            time_params = self._build_time_params(state)
+            general_info_data = await self._call_mcp_tool("get_etcd_general_info", time_params)
             
             if general_info_data.get("status") == "success":
                 return {
@@ -278,8 +315,8 @@ class ETCDAnalyzerStorDBMCPAgent:
         try:
             logger.info("Collecting WAL fsync metrics...")
             
-            wal_fsync_params = {"duration": state["duration"]}
-            wal_fsync_data = await self._call_mcp_tool("get_etcd_disk_wal_fsync", wal_fsync_params)
+            time_params = self._build_time_params(state)
+            wal_fsync_data = await self._call_mcp_tool("get_etcd_disk_wal_fsync", time_params)
             
             if wal_fsync_data.get("status") == "success":
                 return {
@@ -316,8 +353,8 @@ class ETCDAnalyzerStorDBMCPAgent:
         try:
             logger.info("Collecting disk I/O metrics...")
             
-            disk_io_params = {"duration": state["duration"]}
-            disk_io_data = await self._call_mcp_tool("get_etcd_disk_io", disk_io_params)
+            time_params = self._build_time_params(state)
+            disk_io_data = await self._call_mcp_tool("get_etcd_disk_io", time_params)
             
             if disk_io_data.get("status") == "success":
                 return {
@@ -352,8 +389,8 @@ class ETCDAnalyzerStorDBMCPAgent:
         try:
             logger.info("Collecting network I/O metrics...")
             
-            network_io_params = {"duration": state["duration"]}
-            network_io_data = await self._call_mcp_tool("get_etcd_network_io", network_io_params)
+            time_params = self._build_time_params(state)
+            network_io_data = await self._call_mcp_tool("get_etcd_network_io", time_params)
             
             if network_io_data.get("status") == "success":
                 return {
@@ -388,8 +425,8 @@ class ETCDAnalyzerStorDBMCPAgent:
         try:
             logger.info("Collecting backend commit metrics...")
             
-            backend_commit_params = {"duration": state["duration"]}
-            backend_commit_data = await self._call_mcp_tool("get_etcd_disk_backend_commit", backend_commit_params)
+            time_params = self._build_time_params(state)
+            backend_commit_data = await self._call_mcp_tool("get_etcd_disk_backend_commit", time_params)
             
             if backend_commit_data.get("status") == "success":
                 return {
@@ -424,8 +461,8 @@ class ETCDAnalyzerStorDBMCPAgent:
         try:
             logger.info("Collecting compact defrag metrics...")
             
-            compact_defrag_params = {"duration": state["duration"]}
-            compact_defrag_data = await self._call_mcp_tool("get_etcd_disk_compact_defrag", compact_defrag_params)
+            time_params = self._build_time_params(state)
+            compact_defrag_data = await self._call_mcp_tool("get_etcd_disk_compact_defrag", time_params)
             
             if compact_defrag_data.get("status") == "success":
                 return {
@@ -474,7 +511,7 @@ class ETCDAnalyzerStorDBMCPAgent:
                     storage_results["cluster_info"] = f"error: {str(e)}"
                     logger.error(f"Failed to store cluster info: {str(e)}")
             
-            # Store general info data (NEW)
+            # Store general info data
             if state.get("general_info_data"):
                 try:
                     general_info_result = await self.general_info_store.store_general_info_metrics(
@@ -631,7 +668,7 @@ class ETCDAnalyzerStorDBMCPAgent:
                     state["testing_id"]
                 )
             
-            # Get general info summary (NEW)
+            # Get general info summary
             general_info_summary = None
             if state.get("general_info_data"):
                 general_info_summary = await self.general_info_store.get_general_info_summary(
@@ -676,11 +713,11 @@ class ETCDAnalyzerStorDBMCPAgent:
             results = {
                 "testing_id": state["testing_id"],
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "duration": state["duration"],
+                "duration": state.get("duration"),
                 "start_time": state.get("start_time"),
                 "end_time": state.get("end_time"),
                 "cluster_summary": cluster_summary,
-                "general_info_summary": general_info_summary,  # Added general info summary
+                "general_info_summary": general_info_summary,
                 "wal_fsync_summary": wal_fsync_summary,
                 "disk_io_summary": disk_io_summary,
                 "network_io_summary": network_io_summary,
@@ -752,7 +789,7 @@ class ETCDAnalyzerStorDBMCPAgent:
                 logger.info(f"Columns: {info}")
                 logger.info("-" * 50)
             
-            # Print general info tables (NEW)
+            # Print general info tables
             general_info_table_info = await self.general_info_store.get_table_info()
             logger.info("=== General Info DuckDB Tables ===")
             for table_name, info in general_info_table_info.items():
@@ -814,8 +851,8 @@ class ETCDAnalyzerStorDBMCPAgent:
             network_io_data=None,
             backend_commit_data=None,
             compact_defrag_data=None,
-            general_info_data=None,  # Added general info data initialization
-            duration="1h",
+            general_info_data=None,
+            duration=None,
             start_time=None,
             end_time=None,
             testing_id="",
@@ -839,11 +876,12 @@ class ETCDAnalyzerStorDBMCPAgent:
     async def query_by_duration(self, duration: str = "1h", print_table_info: bool = False, query_stored_only: bool = False) -> Dict[str, Any]:
         """Query all metrics data by duration including general info.
         If query_stored_only is True, returns results from DuckDB without collecting new data.
+        Default duration is 1h.
         """
         if query_stored_only:
             try:
                 cluster = await self.cluster_store.query_cluster_info_by_duration(duration)
-                general_info = await self.general_info_store.query_general_info_data_by_duration(duration)  # Added general info query
+                general_info = await self.general_info_store.query_general_info_data_by_duration(duration)
                 wal = await self.wal_fsync_store.query_wal_fsync_data_by_duration(duration)
                 disk = await self.disk_io_store.query_disk_io_data_by_duration(duration)
                 network = await self.network_io_store.query_network_io_data_by_duration(duration)
@@ -854,7 +892,7 @@ class ETCDAnalyzerStorDBMCPAgent:
                     "query_mode": "stored_only",
                     "duration": duration,
                     "cluster_info": cluster,
-                    "general_info": general_info,  # Added general info results
+                    "general_info": general_info,
                     "wal_fsync": wal,
                     "disk_io": disk,
                     "network_io": network,
@@ -880,11 +918,17 @@ class ETCDAnalyzerStorDBMCPAgent:
     async def query_by_time_range(self, start_time: str, end_time: str, print_table_info: bool = False, query_stored_only: bool = False) -> Dict[str, Any]:
         """Query all metrics data by time range (UTC timezone) including general info.
         If query_stored_only is True, returns results from DuckDB without collecting new data.
+        
+        Args:
+            start_time: Start time in UTC format (e.g., '2025-01-01T10:00:00Z')
+            end_time: End time in UTC format (e.g., '2025-01-01T11:00:00Z')
+            print_table_info: Whether to print table information
+            query_stored_only: If True, only query stored data without collecting new data
         """
         if query_stored_only:
             try:
                 cluster = await self.cluster_store.query_cluster_info_by_time_range(start_time, end_time)
-                general_info = await self.general_info_store.query_general_info_data_by_time_range(start_time, end_time)  # Added general info query
+                general_info = await self.general_info_store.query_general_info_data_by_time_range(start_time, end_time)
                 wal = await self.wal_fsync_store.query_wal_fsync_data_by_time_range(start_time, end_time)
                 disk = await self.disk_io_store.query_disk_io_data_by_time_range(start_time, end_time)
                 network = await self.network_io_store.query_network_io_data_by_time_range(start_time, end_time)
@@ -896,7 +940,7 @@ class ETCDAnalyzerStorDBMCPAgent:
                     "start_time": start_time,
                     "end_time": end_time,
                     "cluster_info": cluster,
-                    "general_info": general_info,  # Added general info results
+                    "general_info": general_info,
                     "wal_fsync": wal,
                     "disk_io": disk,
                     "network_io": network,
@@ -920,42 +964,105 @@ class ETCDAnalyzerStorDBMCPAgent:
         return result
 
 async def main():
-    """Example usage of the ETCD Analyzer MCP Agent with General Info support"""
+    """Interactive menu for ETCD Analyzer MCP Agent with General Info support"""
     
     # Initialize the agent
     agent = ETCDAnalyzerStorDBMCPAgent()
     
     try:
- 
-        # Example 2: Query by specific time range (UTC) - collect new data including general info
-        logger.info("=== Executing ETCD Workload Testing ===")
-        start_time=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-        #Run workload script and stream stdout in real-time
-        proc = subprocess.Popen(
-            ['bash', 'etcd-loads/etcd-load-tools.sh', 'all'],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            universal_newlines=True
-        )
-        if proc.stdout is not None:
-            for line in proc.stdout:
-                sys.stdout.write(line)
-                sys.stdout.flush()
-        return_code = proc.wait()
-        if return_code != 0:
-            logger.error(f"Workload script exited with code {return_code}")
-        end_time=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-        logger.info("=== Query by Time Range (UTC) - New Data Collection ===")
-        result2 = await agent.query_by_time_range(start_time, end_time)
-        # result = await agent.query_by_duration(duration="1h")
-        # # print(result)
-     
-
+        # Display header
+        print("=" * 100)
+        print("🔧 OVNK ETCD PERFORMANCE ANALYZER")
+        print("=" * 100)
         
+        # Select mode
+        mode_input = input("🔍 Select mode (1=Duration, 2=Time Range, default=1): ").strip()
+        mode = mode_input if mode_input in ["1", "2"] else "1"
+        
+        if mode == "1":
+            # Duration mode
+            print("\n" + "=" * 100)
+            print("📊 DURATION MODE")
+            print("=" * 100)
+            duration_input = input("⏱️  Enter duration (e.g., 1h, 30m, 2h, default=1h): ").strip()
+            duration = duration_input if duration_input else "1h"
+            
+            query_mode_input = input("💾 Query mode (1=Collect New Data, 2=Query Stored Only, default=1): ").strip()
+            query_stored_only = query_mode_input == "2"
+            
+            print("\n" + "-" * 100)
+            if query_stored_only:
+                logger.info(f"📂 Querying stored data for duration: {duration}")
+            else:
+                logger.info(f"🔄 Collecting new data for duration: {duration}")
+            print("-" * 100 + "\n")
+            
+            result = await agent.query_by_duration(
+                duration=duration, 
+                query_stored_only=query_stored_only
+            )
+            
+        else:
+            # Time range mode
+            print("\n" + "=" * 100)
+            print("📅 TIME RANGE MODE")
+            print("=" * 100)
+            print("⚠️  Please enter times in UTC format: YYYY-MM-DDTHH:MM:SSZ")
+            print("   Example: 2025-11-03T10:00:00Z")
+            
+            start_time_input = input("\n🕐 Enter start time (UTC): ").strip()
+            end_time_input = input("🕑 Enter end time (UTC): ").strip()
+            
+            if not start_time_input or not end_time_input:
+                print("❌ Error: Both start time and end time are required for time range mode!")
+                return
+            
+            query_mode_input = input("💾 Query mode (1=Collect New Data, 2=Query Stored Only, default=1): ").strip()
+            query_stored_only = query_mode_input == "2"
+            
+            print("\n" + "-" * 100)
+            if query_stored_only:
+                logger.info(f"📂 Querying stored data from {start_time_input} to {end_time_input}")
+            else:
+                logger.info(f"🔄 Collecting new data from {start_time_input} to {end_time_input}")
+            print("-" * 100 + "\n")
+            
+            result = await agent.query_by_time_range(
+                start_time=start_time_input,
+                end_time=end_time_input,
+                query_stored_only=query_stored_only
+            )
+        
+        # Display results
+        print("\n" + "=" * 100)
+        print("✅ ANALYSIS COMPLETE")
+        print("=" * 100)
+        print(f"📋 Status: {result.get('status', 'unknown')}")
+        print(f"🆔 Testing ID: {result.get('testing_id', 'N/A')}")
+        print(f"🕒 Timestamp: {result.get('timestamp', 'N/A')}")
+        
+        if mode == "1":
+            print(f"⏱️  Duration: {result.get('duration', 'N/A')}")
+        else:
+            print(f"🕐 Start Time: {result.get('start_time', 'N/A')}")
+            print(f"🕑 End Time: {result.get('end_time', 'N/A')}")
+        
+        if result.get('status') == 'success':
+            storage_results = result.get('storage_results', {})
+            if storage_results:
+                print("\n💾 Storage Results:")
+                for key, value in storage_results.items():
+                    status_icon = "✅" if value == "success" else "❌"
+                    print(f"   {status_icon} {key}: {value}")
+        else:
+            print(f"❌ Error: {result.get('error', 'Unknown error')}")
+        
+        print("=" * 100 + "\n")
+        
+    except KeyboardInterrupt:
+        print("\n\n⚠️  Operation cancelled by user")
     except Exception as e:
-        logger.error(f"Example execution failed: {str(e)}")
+        logger.error(f"❌ Example execution failed: {str(e)}")
 
 if __name__ == "__main__":
     asyncio.run(main())

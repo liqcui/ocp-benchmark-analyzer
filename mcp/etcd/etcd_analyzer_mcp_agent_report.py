@@ -35,6 +35,9 @@ except ModuleNotFoundError:
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     if repo_root not in sys.path:
         sys.path.insert(0, repo_root)
+    # If another installed package named 'analysis' was imported earlier, remove it to prefer local package
+    if 'analysis' in sys.modules:
+        del sys.modules['analysis']
     from analysis.etcd.performance_analysis_report import etcdReportAnalyzer
     from analysis.utils.analysis_utility import etcdAnalyzerUtility
 

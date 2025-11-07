@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OpenShift OVN-K Benchmark MCP - AI Chat Interface</title>
+    <title>OpenShift ETCD Analyzer MCP - AI Chat Interface</title>
     <style>
         * {
             margin: 0;
@@ -577,43 +577,6 @@
             margin-top: 15px;
             justify-content: flex-end;
         }
-
-        @media (max-width: 768px) {
-            .container {
-                flex-direction: column;
-            }
-
-            .sidebar {
-                width: 100%;
-                height: auto;
-                flex-direction: row;
-                padding: 10px;
-            }
-
-            .sidebar-header {
-                flex: 1;
-            }
-
-            .quick-actions {
-                display: none;
-            }
-
-            .status-panel {
-                padding: 10px;
-            }
-
-            .messages {
-                padding: 15px;
-            }
-
-            .input-container {
-                padding: 15px;
-            }
-
-            .message {
-                max-width: 95%;
-            }
-        }
     </style>
 </head>
 
@@ -625,55 +588,48 @@
     <div class="container">
         <div class="sidebar">
             <div class="sidebar-header">
-                <h1>OCP OVN-K Benchmark</h1>
+                <h1>OCP ETCD Analyzer</h1>
                 <p>AI-Powered Performance Analysis</p>
             </div>
-
             <div class="quick-actions">
                 <h3>Quick Actions</h3>
                 <button class="action-button"
-                    onclick="sendQuickMessage('Tell me the current cluster information and analysis readable?')">
-                    🏛️ Cluster Overview
-                </button>
+                    onclick="sendQuickMessage('Tell me the current openshift cluster information and etcd cluster status')">🏛️
+                    Cluster
+                    Overview</button>
+                <button class="action-button" onclick="sendQuickMessage('Show me etcd General Information')">🖥️
+                    Etcd
+                    General Info</button>
+                <button class="action-button" onclick="sendQuickMessage('Show me etcd master node usage')">🖥️
+                    Etcd
+                    Nodes Usage</button>
+                <button class="action-button" onclick="sendQuickMessage('Show me the etcd network IO usage')">🌐
+                    Etcd
+                    Network IO</button>
+                <button class="action-button" onclick="sendQuickMessage('Show me the etcd disk IO usage')">💾
+                    Etcd
+                    Disk
+                    IO</button>
+                <button class="action-button" onclick="sendQuickMessage('Show me the etcd wal fsync')">🔄
+                    Etcd Wal
+                    Fsync</button>
+                <button class="action-button" onclick="sendQuickMessage('Show me the etcd backend commit usage')">🔗
+                    Etcd
+                    Backend Commit</button>
                 <button class="action-button"
-                    onclick="sendQuickMessage('Perform comprehensive general cluster status check and health assessment and make it readable')">
-                    🔍 Cluster Status Check
-                </button>
+                    onclick="sendQuickMessage('Show me the etcd compact and defrag usage')">🗜️
+                    Etcd
+                    Compact Defrag</button>
                 <button class="action-button"
-                    onclick="sendQuickMessage('Show me current cluster node usage and analysis readable')">
-                    🖥️ Cluster Node Usage
-                </button>
+                    onclick="sendQuickMessage('Deep drive analysis for etcd performance and find bottleneck.')">🔍
+                    ETCD
+                    Deep Dive</button>
                 <button class="action-button"
-                    onclick="sendQuickMessage('Show me OVN-K pod resource usage and analysis readable')">
-                    🌐 OVN-K Pods Usage
-                </button>
-                <button class="action-button"
-                    onclick="sendQuickMessage('Check and Analyze OVS performance metrics and make it readable')">
-                    🌐 OVS Analysis
-                </button>
-                <button class="action-button"
-                    onclick="sendQuickMessage('Check and Analyze Multus CNI performance and make it readable')">
-                    🌐 Multus Analysis
-                </button>
-                <button class="action-button"
-                    onclick="sendQuickMessage('Check and Analyze OVN-K latency performance and make it readable')">
-                    🌐 OVNK Latency
-                </button>
-                <button class="action-button"
-                    onclick="sendQuickMessage('Check and Analyze API server performance metrics and make it readable')">
-                    ⚡ API Performance
-                </button>
-                <button class="action-button"
-                    onclick="sendQuickMessage('Show me OVN-K components deep drive analysis and make it readable')">
-                    🔬 OVN-K Deep Dive
-                </button>
-                <button class="action-button"
-                    onclick="sendQuickMessage('Run overall OCP Cluster Performance analysis, include API performance and make it readable')">
-                    📈 Full Performance Report
-                </button>
+                    onclick="sendQuickMessage('Generate comprehensive etcd performance analysis report with detailed each metrics evaluation and recommendations')">📊
+                    Full
+                    Performance Report</button>
                 <button class="action-button" onclick="toggleSystemPromptModal()">⚙️ Configure AI Behavior</button>
             </div>
-
             <div class="status-panel">
                 <div class="status-item">
                     <div class="status-dot checking" id="mcpStatus"></div>
@@ -698,11 +654,9 @@
             <div class="chat-container">
                 <div class="messages" id="messages">
                     <div class="welcome-message">
-                        <h3>Welcome to OpenShift OVN-K Benchmark AI Assistant</h3>
-                        <p>I can help you analyze your OpenShift cluster performance, check system health,
-                            and provide insights about your infrastructure using advanced AI and comprehensive
-                            monitoring tools.</p>
-
+                        <h3>Welcome to OpenShift ETCD Analyzer AI Assistant</h3>
+                        <p>I can help you analyze your OpenShift cluster performance, check system health, and provide
+                            insights about your infrastructure using advanced AI and comprehensive monitoring tools.</p>
                         <div class="suggestions">
                             <span class="suggestion" onclick="sendQuickMessage('Show cluster information')">Cluster
                                 Info</span>
@@ -760,32 +714,22 @@
     </div>
 
     <script>
-        // Utility function to decode Unicode escapes
         function decodeUnicodeEscapes(text) {
             try {
                 if (!text || typeof text !== 'string') return text;
                 text = text.replace(/\\u([0-9a-fA-F]{4})/g, (m, g1) => {
-                    try {
-                        return String.fromCharCode(parseInt(g1, 16));
-                    } catch {
-                        return m;
-                    }
+                    try { return String.fromCharCode(parseInt(g1, 16)); } catch { return m; }
                 });
                 return text;
-            } catch (e) {
-                return text;
-            }
+            } catch (e) { return text; }
         }
 
-        // Global application state
         class ChatApplication {
             constructor() {
                 this.conversationId = 'web-' + Math.random().toString(36).substr(2, 9);
                 this.isConnected = false;
                 this.isTyping = false;
                 this.healthCheckInterval = null;
-
-                // Initialize DOM elements
                 this.initializeElements();
                 this.setupEventListeners();
                 this.startAutoHealthCheck();
@@ -797,19 +741,14 @@
                 this.sendButton = document.getElementById('sendButton');
                 this.typingIndicator = document.getElementById('typingIndicator');
                 this.loadingOverlay = document.getElementById('loadingOverlay');
-
-                // Status elements
                 this.mcpStatus = document.getElementById('mcpStatus');
                 this.mcpStatusText = document.getElementById('mcpStatusText');
                 this.clusterStatus = document.getElementById('clusterStatus');
                 this.clusterStatusText = document.getElementById('clusterStatusText');
-
-                // Initial button state
                 this.sendButton.disabled = true;
             }
 
             setupEventListeners() {
-                // Enter key to send message
                 this.messageInput.addEventListener('keypress', (e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
@@ -817,14 +756,12 @@
                     }
                 });
 
-                // Auto-resize textarea and enable/disable send button
                 this.messageInput.addEventListener('input', (e) => {
                     e.target.style.height = 'auto';
                     e.target.style.height = (e.target.scrollHeight) + 'px';
                     this.sendButton.disabled = !e.target.value.trim() || this.isTyping;
                 });
 
-                // Handle page visibility change to pause/resume auto-refresh
                 document.addEventListener('visibilitychange', () => {
                     if (document.hidden) {
                         this.stopAutoHealthCheck();
@@ -833,24 +770,17 @@
                     }
                 });
 
-                // Handle window beforeunload to cleanup intervals
                 window.addEventListener('beforeunload', () => {
                     this.stopAutoHealthCheck();
                 });
             }
 
             startAutoHealthCheck() {
-                // Clear any existing interval
                 this.stopAutoHealthCheck();
-
-                // Perform initial health check
                 this.checkHealth(false);
-
-                // Set up automatic refresh every 30 seconds
                 this.healthCheckInterval = setInterval(() => {
                     this.checkHealth(false);
                 }, 30000);
-
                 console.log('Auto health check started');
             }
 
@@ -868,14 +798,12 @@
 
                 console.log('Sending message:', message);
 
-                // Clear input if not using custom message
                 if (!customMessage) {
                     this.messageInput.value = '';
                     this.messageInput.style.height = 'auto';
                     this.sendButton.disabled = true;
                 }
 
-                // Add user message
                 this.addMessage(message, 'user');
                 this.showTyping(true);
 
@@ -897,10 +825,7 @@
 
                 } catch (error) {
                     this.showTyping(false);
-                    this.addMessage(
-                        `Connection Error: ${error.message}<br><em>Make sure the MCP client is running</em>`,
-                        'error'
-                    );
+                    this.addMessage(`Connection Error: ${error.message}<br><em>Make sure the MCP client is running</em>`, 'error');
                 }
             }
 
@@ -920,7 +845,7 @@
 
                         buffer += decoder.decode(value, { stream: true });
                         const lines = buffer.split('\n');
-                        buffer = lines.pop(); // Keep incomplete line in buffer
+                        buffer = lines.pop();
 
                         for (const line of lines) {
                             if (line.startsWith('data: ')) {
@@ -935,10 +860,8 @@
                                             aiMessageDiv.classList.add('streaming');
                                         }
 
-                                        // Decode Unicode escapes in content
                                         let content = decodeUnicodeEscapes(data.content);
 
-                                        // Separate tool results from AI analysis
                                         if (data.tool_result) {
                                             console.log('Tool result received:', content.substring(0, 100));
                                             hasToolResults = true;
@@ -952,7 +875,6 @@
                                             }
                                         }
 
-                                        // Update display with both tool results and AI analysis
                                         this.updateMessageDisplay(aiMessageDiv, toolResultsContent, aiAnalysisContent, hasToolResults);
                                         this.scrollToBottom();
 
@@ -982,12 +904,10 @@
             updateMessageDisplay(messageDiv, toolResults, aiAnalysis, hasToolResults) {
                 let displayContent = '';
 
-                // Display tool results first
                 if (toolResults.length > 0) {
                     for (let i = 0; i < toolResults.length; i++) {
                         let toolContent = toolResults[i];
 
-                        // Ensure tables have proper styling
                         if (toolContent.includes('<table')) {
                             toolContent = toolContent.replace(/<table/g, '<table class="response-table"');
                         }
@@ -999,10 +919,8 @@
                     }
                 }
 
-                // Display AI analysis after tool results
                 if (aiAnalysis.trim()) {
                     let formattedAnalysis = aiAnalysis;
-                    // Convert markdown-style formatting to HTML
                     formattedAnalysis = formattedAnalysis.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
                     formattedAnalysis = formattedAnalysis.replace(/\*(.*?)\*/g, '<em>$1</em>');
                     formattedAnalysis = formattedAnalysis.replace(/\n/g, '<br>');
@@ -1021,7 +939,6 @@
             }
 
             addMessage(content, type) {
-                // Remove welcome message if it exists
                 const welcomeMessage = this.messagesContainer.querySelector('.welcome-message');
                 if (welcomeMessage) {
                     welcomeMessage.remove();
@@ -1080,11 +997,10 @@
                         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                     }
 
-                    // Check content type before parsing
                     const contentType = response.headers.get('content-type');
                     if (!contentType || !contentType.includes('application/json')) {
                         const text = await response.text();
-                        throw new Error(`Expected JSON response but got ${contentType}. Response: ${text.substring(0, 200)}`);
+                        throw new Error(`Expected JSON response but got ${contentType}`);
                     }
 
                     const health = await response.json();
@@ -1125,30 +1041,33 @@
                         throw new Error(`HTTP ${clusterResponse.status}: ${clusterResponse.statusText}`);
                     }
 
-                    // Check content type before parsing
                     const contentType = clusterResponse.headers.get('content-type');
                     if (!contentType || !contentType.includes('application/json')) {
                         const text = await clusterResponse.text();
-                        throw new Error(`Expected JSON response but got ${contentType}. Response: ${text.substring(0, 200)}`);
+                        throw new Error(`Expected JSON response but got ${contentType}`);
                     }
 
                     const clusterHealth = await clusterResponse.json();
                     console.log('Cluster health response:', clusterHealth);
 
-                    // Look for cluster health in the details object
+                    const overallStatus = clusterHealth.status || 'unknown';
                     const healthDetails = clusterHealth.details || {};
-                    const overallStatus = healthDetails.overall_cluster_health ||
-                        healthDetails.health_details?.overall_cluster_health ||
-                        'unknown';
+                    const detailsStatus = healthDetails.overall_health || healthDetails.status || 'unknown';
+                    const collectorsInitialized = healthDetails.collectors_initialized || false;
+                    const toolsAvailable = healthDetails.tools_available || 0;
 
-                    console.log('Overall status:', overallStatus);
+                    console.log('Overall status:', overallStatus, 'Details status:', detailsStatus);
 
-                    if (overallStatus === 'healthy') {
-                        this.updateClusterStatus('connected', `Cluster ${overallStatus.charAt(0).toUpperCase()}${overallStatus.slice(1).toLowerCase()}`);
-                    } else if (overallStatus === 'unknown') {
+                    const finalStatus = detailsStatus !== 'unknown' ? detailsStatus : overallStatus;
+
+                    if (finalStatus === 'healthy' && collectorsInitialized) {
+                        this.updateClusterStatus('connected', `Cluster Healthy (${toolsAvailable} tools)`);
+                    } else if (finalStatus === 'healthy') {
+                        this.updateClusterStatus('connected', 'Cluster Healthy');
+                    } else if (finalStatus === 'unknown') {
                         this.updateClusterStatus('checking', 'Cluster Status Unknown');
                     } else {
-                        this.updateClusterStatus('disconnected', 'Cluster Issues Detected');
+                        this.updateClusterStatus('disconnected', `Cluster ${finalStatus}`);
                     }
                 } catch (e) {
                     console.error('Cluster health check failed:', e);
@@ -1167,7 +1086,6 @@
             }
         }
 
-        // System prompt management functions
         async function toggleSystemPromptModal() {
             const modal = document.getElementById('systemPromptModal');
             if (modal.style.display === 'none' || !modal.style.display) {
@@ -1236,14 +1154,12 @@
             }
         }
 
-        // Initialize application when DOM is loaded
         let chatApp;
 
         document.addEventListener('DOMContentLoaded', function () {
             chatApp = new ChatApplication();
         });
 
-        // Global functions for button onclick handlers
         function sendMessage(customMessage) {
             chatApp?.sendMessage(customMessage);
         }

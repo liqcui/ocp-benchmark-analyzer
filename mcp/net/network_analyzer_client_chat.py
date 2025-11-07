@@ -31,7 +31,7 @@ from langgraph.prebuilt import create_react_agent
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.checkpoint.memory import MemorySaver
 from dotenv import load_dotenv
-from elt.ovnk_benchmark_elt_json2table import json_to_html_table
+from elt.utils.analyzer_elt_json2table import convert_json_to_html_table
 
 import warnings
 # Suppress urllib3 deprecation warning triggered by kubernetes client using HTTPResponse.getheaders()
@@ -110,7 +110,7 @@ class MCPTool(BaseTool):
 class MCPClient:
     """MCP Client for interacting with the benchmark server"""
     
-    def __init__(self, mcp_server_url: str = "http://localhost:8000"):
+    def __init__(self, mcp_server_url: str = "http://localhost:8002"):
         self.mcp_server_url = mcp_server_url
         self.session = None
         self.available_tools: List[Dict[str, Any]] = []
@@ -225,7 +225,7 @@ class MCPClient:
                                     return json_data
                                 else:
                                     # Format other data as HTML table
-                                    return json_to_html_table(json_data)
+                                    return convert_json_to_html_table(json_data)
                                     # return json_data
                             else:
                                 # Return plain text
@@ -617,20 +617,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve the web UI HTML
-HTML_FILE_PATH = os.path.join(os.path.dirname(__file__), "html", "ovnk_benchmark_mcp_llm.html")
+# Serve the web UI HTML (moved to project-level webroot)
+HTML_FILE_PATH = os.path.join(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")),
+    "webroot",
+    "net",
+    "network_analyzer_mcp_llm.html",
+)
 
 @app.get("/", include_in_schema=False)
 async def serve_root_html():
     if os.path.exists(HTML_FILE_PATH):
         return FileResponse(HTML_FILE_PATH, media_type="text/html")
-    raise HTTPException(status_code=404, detail="ovnk_benchmark_mcp_llm.html not found")
+    raise HTTPException(status_code=404, detail="network_analyzer_mcp_llm.html not found")
 
 @app.get("/ui", include_in_schema=False)
 async def serve_ui_html():
     if os.path.exists(HTML_FILE_PATH):
         return FileResponse(HTML_FILE_PATH, media_type="text/html")
-    raise HTTPException(status_code=404, detail="ovnk_benchmark_mcp_llm.html not found")
+    raise HTTPException(status_code=404, detail="network_analyzer_mcp_llm.html not found")
 
 @app.get("/api/mcp/health", response_model=HealthResponse)
 async def mcp_health_check():
@@ -787,9 +792,9 @@ if __name__ == "__main__":
     
     # Run the server
     uvicorn.run(
-        "ovnk_benchmark_mcp_client_chat:app",
+        "network_analyzer_client_chat:app",
         host="0.0.0.0",
-        port=8080,
+        port=8082,
         ws="wsproto",
         reload=True,
         log_level="info"
