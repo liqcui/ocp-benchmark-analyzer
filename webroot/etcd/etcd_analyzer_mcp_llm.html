@@ -724,6 +724,25 @@
             } catch (e) { return text; }
         }
 
+        // Fix common mojibake (UTF-8 shown as Latin-1) like "ð" and "âï¸" safely
+        function fixMojibake(text) {
+            try {
+                if (!text || typeof text !== 'string') return text;
+                const maybeMojibake = /[ÃÂâð]/.test(text);
+                if (!maybeMojibake) return text;
+                try {
+                    return decodeURIComponent(escape(text));
+                } catch (e) {
+                    try {
+                        const bytes = Uint8Array.from(Array.from(text, c => c.charCodeAt(0) & 0xFF));
+                        return new TextDecoder('utf-8').decode(bytes);
+                    } catch (_) {
+                        return text;
+                    }
+                }
+            } catch (e) { return text; }
+        }
+
         class ChatApplication {
             constructor() {
                 this.conversationId = 'web-' + Math.random().toString(36).substr(2, 9);
@@ -860,7 +879,7 @@
                                             aiMessageDiv.classList.add('streaming');
                                         }
 
-                                        let content = decodeUnicodeEscapes(data.content);
+                                        let content = fixMojibake(decodeUnicodeEscapes(data.content));
 
                                         if (data.tool_result) {
                                             console.log('Tool result received:', content.substring(0, 100));
@@ -906,7 +925,7 @@
 
                 if (toolResults.length > 0) {
                     for (let i = 0; i < toolResults.length; i++) {
-                        let toolContent = toolResults[i];
+                        let toolContent = fixMojibake(toolResults[i]);
 
                         if (toolContent.includes('<table')) {
                             toolContent = toolContent.replace(/<table/g, '<table class="response-table"');
@@ -924,6 +943,7 @@
                     formattedAnalysis = formattedAnalysis.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
                     formattedAnalysis = formattedAnalysis.replace(/\*(.*?)\*/g, '<em>$1</em>');
                     formattedAnalysis = formattedAnalysis.replace(/\n/g, '<br>');
+                    formattedAnalysis = fixMojibake(formattedAnalysis);
 
                     if (hasToolResults) {
                         displayContent += `<div class="ai-analysis-section">
