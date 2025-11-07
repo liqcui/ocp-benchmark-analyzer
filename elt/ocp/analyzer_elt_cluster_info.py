@@ -7,7 +7,7 @@ ONLY contains cluster_info specific logic - no generic utilities
 import logging
 from typing import Dict, Any, List
 import pandas as pd
-from ..utils.etcd_analyzer_elt_utility import utilityELT
+from ..utils.analyzer_elt_utility import utilityELT
 
 logger = logging.getLogger(__name__)
 
