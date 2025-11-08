@@ -232,11 +232,22 @@ async def initialize_components():
         await auth_manager.initialize()
         logger.info("✅ OpenShift authentication initialized")
         
-        # Initialize Prometheus client
-        prometheus_client = PrometheusBaseQuery(
-            auth_manager.prometheus_url,
-            auth_manager.prometheus_token
-        )
+        # Initialize Prometheus client (prefer route URL over service DNS)
+        prom_cfg = auth_manager.get_prometheus_config() or {}
+        base_url = prom_cfg.get('url') or auth_manager.prometheus_url
+        token = prom_cfg.get('token') or auth_manager.prometheus_token
+        # If base_url points to cluster-internal service DNS, try to prefer a route-like URL from fallbacks
+        fallbacks = prom_cfg.get('fallback_urls') or []
+        def _is_route(u: str) -> bool:
+            # Heuristic: OpenShift routes typically contain '.apps.' and are not svc.cluster.local
+            return ('.apps.' in u) and ('svc.cluster.local' not in u)
+        preferred_url = base_url
+        # Prefer first route-like URL in fallbacks
+        for u in fallbacks:
+            if _is_route(u):
+                preferred_url = u
+                break
+        prometheus_client = PrometheusBaseQuery(preferred_url, token)
         
         logger.info("="*70)
         logger.info("✅ All components initialized successfully!")
