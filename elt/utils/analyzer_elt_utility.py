@@ -770,15 +770,31 @@ class utilityELT:
             return f"{value} {unit}".strip()
 
     def format_and_highlight(self, value: float, unit: str, 
-                             thresholds: Dict[str, float], 
-                             is_top: bool = False) -> str:
-        """Format a value with unit, then apply highlight thresholds/top-1 wrapper."""
+                            thresholds: Dict[str, float], 
+                            is_top: bool = False) -> str:
+        """Format a value with unit and apply highlight thresholds"""
+        try:
+            value = float(value) if value is not None else 0
+        except (ValueError, TypeError):
+            return str(value)
+        
+        # Format the value with unit
         readable = self.format_value_with_unit(value, unit)
-        # highlight_critical_values expects numeric plus unit suffix, not pre-formatted with scales.
-        # To preserve highlight semantics, extract numeric back from readable for thresholds.
-        numeric = self.extract_numeric_value(readable)
-        unit_suffix = '' if unit in ['count', '', None] else f" {unit}"
-        return self.highlight_critical_values(numeric, thresholds or {}, unit_suffix, is_top)
+        
+        critical = thresholds.get('critical', float('inf'))
+        warning = thresholds.get('warning', float('inf'))
+        
+        # Top 1 highlighting
+        if is_top and value > 0:
+            return f'<span class="text-primary font-weight-bold bg-light px-1">🏆 {readable}</span>'
+        # Critical highlighting
+        elif value >= critical:
+            return f'<span class="text-danger font-weight-bold">⚠️ {readable}</span>'
+        # Warning highlighting
+        elif value >= warning:
+            return f'<span class="text-warning font-weight-bold">{readable}</span>'
+        else:
+            return readable
 
     def format_packets_per_second(self, packets_per_sec: float) -> str:
         """Format packets per second to readable units"""

@@ -191,6 +191,16 @@ class GenericELT(utilityELT):
             logger.warning(f"Could not import network_netstat_udp handler: {e}")
 
         try:
+            from ..net.analyzer_elt_network_io import networkIOELT
+            register_metric_handler(
+                'network_io',
+                networkIOELT,
+                self._is_network_io
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import network_io handler: {e}")
+
+        try:
             from ..etcd.analyzer_elt_cluster_status import etcdClusterStatusELT
             register_metric_handler(
                 'etcd_cluster_status',
@@ -211,7 +221,6 @@ class GenericELT(utilityELT):
             )
         except ImportError as e:
             logger.warning(f"Could not import backend_commit handler: {e}")
-
 
     # ============================================================================
     # DATA TYPE IDENTIFICATION
@@ -354,9 +363,21 @@ class GenericELT(utilityELT):
                     if any(keyword in metric_name for keyword in ['udp_error', 'nestat_udp', 'netstat_udp']):
                         return True
         return False
-    # ============================================================================
-    # MAIN PROCESSING PIPELINE
-    # ============================================================================
+
+    @staticmethod
+    def _is_network_io(data: Dict[str, Any]) -> bool:
+        """Identify network IO data"""
+        if 'category' in data and data.get('category') == 'network_io':
+            return True
+        if 'data' in data and isinstance(data.get('data'), dict):
+            nested_data = data['data']
+            if 'category' in nested_data and nested_data.get('category') == 'network_io':
+                return True
+            if 'metrics' in nested_data and isinstance(nested_data.get('metrics'), dict):
+                metric_keys = nested_data['metrics'].keys()
+                if any('network_io' in k for k in metric_keys):
+                    return True
+        return False
 
     @staticmethod
     def _is_etcd_cluster_status(data: Dict[str, Any]) -> bool:
@@ -409,6 +430,11 @@ class GenericELT(utilityELT):
                 return True
         
         return False
+
+
+    # ============================================================================
+    # MAIN PROCESSING PIPELINE
+    # ============================================================================
 
     def process_data(self, data: Union[Dict[str, Any], str]) -> Dict[str, Any]:
         """
@@ -477,6 +503,9 @@ class GenericELT(utilityELT):
             elif data_type == 'network_netstat_udp':  # NEW
                 structured_data = handler.extract_network_netstat_udp(actual_data) if hasattr(handler, 'extract_network_netstat_udp') else {}
                 summary_method = 'summarize_network_netstat_udp'
+            elif data_type == 'network_io':
+                structured_data = handler.extract_network_io(actual_data) if hasattr(handler, 'extract_network_io') else {}
+                summary_method = 'summarize_network_io'                
             elif data_type == 'etcd_cluster_status':  # NEW
                 structured_data = handler.extract_cluster_status(actual_data) if hasattr(handler, 'extract_cluster_status') else {}
                 summary_method = 'summarize_cluster_status'                
@@ -584,6 +613,12 @@ class GenericELT(utilityELT):
                 return data['result']['data']
         
         return data
+
+        if data_type == 'network_io':
+            if 'data' in data and isinstance(data.get('data'), dict):
+                return data['data']
+            if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
+                return data['result']['data']
 
         if data_type == 'backend_commit':
             if 'data' in data and isinstance(data.get('data'), dict):
