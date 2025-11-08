@@ -263,6 +263,19 @@ class GenericELT(utilityELT):
         return False
 
     @staticmethod
+    def _is_network_socket_udp(data: Dict[str, Any]) -> bool:
+        """Identify network socket UDP data"""
+        if 'category' in data and data.get('category') == 'network_socket_udp':
+            return True
+        if 'metrics' in data and isinstance(data.get('metrics'), list):
+            for metric in data['metrics']:
+                if isinstance(metric, dict):
+                    metric_name = metric.get('metric', '')
+                    if 'udp' in metric_name.lower():
+                        return True
+        return False
+
+    @staticmethod
     def _is_network_socket_ip(data: Dict[str, Any]) -> bool:
         """Identify network socket IP data"""
         if 'category' in data and data.get('category') in ['network_netstat_ip', 'network_socket_ip']:
