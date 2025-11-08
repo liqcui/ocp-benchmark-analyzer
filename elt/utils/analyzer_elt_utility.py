@@ -795,4 +795,80 @@ class utilityELT:
             else:
                 return f"{packets_per_sec/1000000:.2f}M pps"
         except (ValueError, TypeError):
-            return str(packets_per_sec)        
+            return str(packets_per_sec)      
+
+    def format_latency_ms(self, seconds: float) -> str:
+        """Format latency from seconds to milliseconds with appropriate precision"""
+        try:
+            seconds = float(seconds)
+            ms = seconds * 1000
+            if ms < 0.001:
+                return f"{ms * 1000:.2f} Î¼s"
+            elif ms < 1:
+                return f"{ms:.3f} ms"
+            elif ms < 10:
+                return f"{ms:.2f} ms"
+            elif ms < 100:
+                return f"{ms:.1f} ms"
+            else:
+                return f"{ms:.0f} ms"
+        except (ValueError, TypeError):
+            return str(seconds)
+
+    def format_latency_seconds(self, seconds: float) -> str:
+        """Format latency in seconds with appropriate unit"""
+        try:
+            seconds = float(seconds)
+            if seconds < 0.000001:
+                return f"{seconds * 1000000:.2f} Î¼s"
+            elif seconds < 0.001:
+                return f"{seconds * 1000:.3f} ms"
+            elif seconds < 1:
+                return f"{seconds * 1000:.2f} ms"
+            else:
+                return f"{seconds:.3f} s"
+        except (ValueError, TypeError):
+            return str(seconds)
+
+    def get_latency_thresholds_ms(self) -> Dict[str, float]:
+        """Get standard latency thresholds in milliseconds"""
+        return {
+            'critical': 50.0,  # >50ms is critical
+            'warning': 20.0     # >20ms is warning
+        }
+
+    def get_rate_thresholds(self) -> Dict[str, float]:
+        """Get standard rate/throughput thresholds"""
+        return {
+            'critical': 2000.0,  # Very high rate might indicate issues
+            'warning': 1000.0
+        }
+
+    def highlight_latency_value(self, value_ms: float, is_top: bool = False) -> str:
+        """Highlight latency value with color coding"""
+        try:
+            thresholds = self.get_latency_thresholds_ms()
+            formatted = self.format_latency_ms(value_ms / 1000)  # Convert back to seconds for formatting
+            
+            if is_top:
+                return f'<span class="text-primary font-weight-bold bg-light px-1">🏆 {formatted}</span>'
+            elif value_ms >= thresholds['critical']:
+                return f'<span class="text-danger font-weight-bold">⚠️ {formatted}</span>'
+            elif value_ms >= thresholds['warning']:
+                return f'<span class="text-warning font-weight-bold">{formatted}</span>'
+            else:
+                return f'<span class="text-success">{formatted}</span>'
+        except (ValueError, TypeError):
+            return str(value_ms)
+
+    def highlight_rate_value(self, value: float, unit: str = "ops/sec", is_top: bool = False) -> str:
+        """Highlight rate/throughput value with color coding"""
+        try:
+            formatted = self.format_operations_per_second(value)
+            
+            if is_top:
+                return f'<span class="text-primary font-weight-bold bg-light px-1">🏆 {formatted}</span>'
+            else:
+                return formatted
+        except (ValueError, TypeError):
+            return str(value)              

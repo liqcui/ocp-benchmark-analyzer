@@ -242,8 +242,8 @@ class MCPClient:
                                     return json_data
                                 else:
                                     # Format other data as HTML table
-                                    print("call_tool("+tool_name+"):",json_data)
-                                    print("convert_json_to_html_table(json_data):",convert_json_to_html_table(json_data))
+                                    # print("call_tool("+tool_name+"):",json_data)
+                                    # print("convert_json_to_html_table(json_data):",convert_json_to_html_table(json_data))
                                     return convert_json_to_html_table(json_data)
                                     # return json_data
                             else:

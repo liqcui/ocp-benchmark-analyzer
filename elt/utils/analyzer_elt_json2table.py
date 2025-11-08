@@ -189,8 +189,29 @@ class GenericELT(utilityELT):
             )
         except ImportError as e:
             logger.warning(f"Could not import network_netstat_udp handler: {e}")
-        
+
+        try:
+            from ..etcd.analyzer_elt_cluster_status import etcdClusterStatusELT
+            register_metric_handler(
+                'etcd_cluster_status',
+                etcdClusterStatusELT,
+                self._is_etcd_cluster_status
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import etcd_cluster_status handler: {e}")
+
         self.registry._initialized = True
+
+        try:
+            from ..etcd.analyzer_elt_backend_commit import backendCommitELT
+            register_metric_handler(
+                'backend_commit',
+                backendCommitELT,
+                self._is_backend_commit
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import backend_commit handler: {e}")
+
 
     # ============================================================================
     # DATA TYPE IDENTIFICATION
@@ -336,7 +357,59 @@ class GenericELT(utilityELT):
     # ============================================================================
     # MAIN PROCESSING PIPELINE
     # ============================================================================
-    
+
+    @staticmethod
+    def _is_etcd_cluster_status(data: Dict[str, Any]) -> bool:
+        """Identify etcd cluster status data"""
+        if 'etcd_pod' in data and 'cluster_health' in data:
+            return True
+        
+        # Check nested structure
+        if 'data' in data and isinstance(data.get('data'), dict):
+            inner = data['data']
+            if 'etcd_pod' in inner and 'cluster_health' in inner:
+                return True
+            if 'endpoint_status' in inner and 'member_status' in inner:
+                return True
+        
+        # Check for cluster status indicators
+        if ('endpoint_status' in data and 'member_status' in data and 
+            'leader_info' in data):
+            return True
+        
+        return False
+
+    @staticmethod
+    def _is_backend_commit(data: Dict[str, Any]) -> bool:
+        """Identify backend commit data"""
+        if 'category' in data and data.get('category') == 'disk_backend_commit':
+            return True
+        
+        # Check for nested structure
+        if 'data' in data and isinstance(data.get('data'), dict):
+            inner = data['data']
+            if 'category' in inner and inner.get('category') == 'disk_backend_commit':
+                return True
+            # Check for pods_metrics or metrics with backend commit metric names
+            metrics = inner.get('metrics') or inner.get('pods_metrics')
+            if isinstance(metrics, dict):
+                if any('backend_commit' in k or 'disk_backend_commit' in k 
+                       for k in metrics.keys()):
+                    return True
+        
+        # Direct metrics check
+        if 'metrics' in data and isinstance(data.get('metrics'), dict):
+            if any('backend_commit' in k or 'disk_backend_commit' in k 
+                   for k in data['metrics'].keys()):
+                return True
+        
+        if 'pods_metrics' in data and isinstance(data.get('pods_metrics'), dict):
+            if any('backend_commit' in k or 'disk_backend_commit' in k 
+                   for k in data['pods_metrics'].keys()):
+                return True
+        
+        return False
+
     def process_data(self, data: Union[Dict[str, Any], str]) -> Dict[str, Any]:
         """
         Main entry point for processing any metric data
@@ -404,6 +477,12 @@ class GenericELT(utilityELT):
             elif data_type == 'network_netstat_udp':  # NEW
                 structured_data = handler.extract_network_netstat_udp(actual_data) if hasattr(handler, 'extract_network_netstat_udp') else {}
                 summary_method = 'summarize_network_netstat_udp'
+            elif data_type == 'etcd_cluster_status':  # NEW
+                structured_data = handler.extract_cluster_status(actual_data) if hasattr(handler, 'extract_cluster_status') else {}
+                summary_method = 'summarize_cluster_status'                
+            elif data_type == 'backend_commit':
+                structured_data = handler.extract_backend_commit(actual_data) if hasattr(handler, 'extract_backend_commit') else {}
+                summary_method = 'summarize_backend_commit'
             else:
                 # Generic fallback
                 structured_data = handler.extract_cluster_info(actual_data) if hasattr(handler, 'extract_cluster_info') else {}
@@ -440,7 +519,14 @@ class GenericELT(utilityELT):
                 return data['result']['data']
             elif 'data' in data and isinstance(data.get('data'), dict):
                 return data['data']
-        
+
+        # Unwrap for etcd_cluster_status - NEW
+        if data_type == 'etcd_cluster_status':
+            if 'data' in data and isinstance(data.get('data'), dict):
+                return data['data']
+            if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
+                return data['result']['data']
+
         # Unwrap typical wrappers for network_l1 as well
         if data_type == 'network_l1':
             if 'data' in data and isinstance(data.get('data'), dict):
@@ -498,6 +584,12 @@ class GenericELT(utilityELT):
                 return data['result']['data']
         
         return data
+
+        if data_type == 'backend_commit':
+            if 'data' in data and isinstance(data.get('data'), dict):
+                return data['data']
+            if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
+                return data['result']['data']
 
     def _process_generic(self, data: Dict[str, Any], data_type: str) -> Dict[str, Any]:
         """Generic processing for unknown data types"""

@@ -1,429 +1,443 @@
 """
-Backend Commit ELT Module for ETCD Analyzer
-Extract, Load, Transform module for backend commit duration metrics
+Extract, Load, Transform module for etcd Backend Commit Metrics
+Handles disk backend commit duration metrics from tools/etcd/etcd_disk_backend_commit.py
+ONLY contains backend_commit specific logic - no generic utilities
 """
 
 import logging
-from typing import Dict, Any, List, Union
+from typing import Dict, Any, List
 import pandas as pd
-
-from .etcd_analyzer_elt_utility import utilityELT
+from ..utils.analyzer_elt_utility import utilityELT
 
 logger = logging.getLogger(__name__)
 
+
 class backendCommitELT(utilityELT):
-    """ELT module for backend commit metrics"""
+    """Extract, Load, Transform class for backend commit metrics data"""
     
     def __init__(self):
         super().__init__()
+        self.metric_configs = {
+            'disk_backend_commit_duration_seconds_p99': {
+                'title': 'P99 Commit Latency',
+                'unit': 'seconds',
+                'thresholds': {'critical': 0.050, 'warning': 0.020}  # 50ms, 20ms
+            },
+            'disk_backend_commit_duration_sum_rate': {
+                'title': 'Commit Duration Rate',
+                'unit': 'seconds',
+                'thresholds': {}
+            },
+            'disk_backend_commit_duration_sum': {
+                'title': 'Total Commit Duration',
+                'unit': 'seconds',
+                'thresholds': {}
+            },
+            'disk_backend_commit_duration_count_rate': {
+                'title': 'Commit Operations Rate',
+                'unit': 'ops_per_second',
+                'thresholds': {}
+            },
+            'disk_backend_commit_duration_count': {
+                'title': 'Total Commit Operations',
+                'unit': 'count',
+                'thresholds': {}
+            }
+        }
     
     def extract_backend_commit(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Extract backend commit metrics from tool result"""
-        try:
-            # Handle nested data structure and accept both 'metrics' and 'pods_metrics'
-            metrics_data = None
-            if isinstance(data.get('data'), dict):
-                inner = data['data']
-                if 'metrics' in inner and isinstance(inner['metrics'], dict):
-                    metrics_data = inner
-                elif 'pods_metrics' in inner and isinstance(inner['pods_metrics'], dict):
-                    # Shape is equivalent to metrics
-                    metrics_data = {
-                        'metrics': inner['pods_metrics'],
-                        'summary': inner.get('summary', {}),
-                        'timestamp': inner.get('timestamp'),
-                        'duration': inner.get('duration')
-                    }
-            elif 'metrics' in data and isinstance(data['metrics'], dict):
-                metrics_data = data
-            elif 'pods_metrics' in data and isinstance(data['pods_metrics'], dict):
-                metrics_data = {
-                    'metrics': data['pods_metrics'],
-                    'summary': data.get('summary', {}),
-                    'timestamp': data.get('timestamp'),
-                    'duration': data.get('duration')
-                }
-            if metrics_data is None:
-                return {'error': 'No metrics data found in backend commit result'}
+        """Extract backend commit information from etcd_disk_backend_commit.py output"""
+        
+        # Handle nested data structure
+        actual_data = data
+        if 'data' in data and isinstance(data.get('data'), dict):
+            actual_data = data['data']
+        
+        # Support both 'metrics' and 'pods_metrics' keys
+        metrics_data = actual_data.get('metrics') or actual_data.get('pods_metrics')
+        if not metrics_data or not isinstance(metrics_data, dict):
+            return {'error': 'No metrics data found in backend commit result'}
+        
+        structured = {
+            'backend_commit_overview': [],
+        }
+        
+        # Initialize role-based tables for each metric
+        roles = ['controlplane', 'infra', 'worker', 'workload']
+        metric_types = ['p99_latency', 'duration_sum_rate', 'duration_sum', 'count_rate', 'count']
+        
+        for role in roles:
+            for metric_type in metric_types:
+                structured[f'{metric_type}_{role}'] = []
+        
+        # Extract pods data and categorize by role
+        pods_by_role = self._categorize_pods_by_role(metrics_data)
+        
+        # Process each metric type
+        for metric_name, metric_data in metrics_data.items():
+            if metric_data.get('status') != 'success':
+                continue
             
-            structured = {
-                'category': 'disk_backend_commit',
-                'timestamp': data.get('timestamp', metrics_data.get('timestamp')),
-                'duration': data.get('duration', metrics_data.get('duration', '1h')),
-                'summary': metrics_data.get('summary', {}),
-                'metrics': {},
-                'pod_metrics': {},
-                'overall_metrics': {}
-            }
-            
-            # Process each metric
-            def normalize_name(name: str) -> str:
-                # Keep p99 key as-is
-                if name.startswith('disk_backend_commit_duration_seconds_p99'):
-                    return name
-                # Convert 'disk_backend_commit_*' to 'backend_commit_*'
-                if name.startswith('disk_backend_commit_'):
-                    return 'backend_commit_' + name[len('disk_backend_commit_'):]
-                return name
-
-            for metric_name, metric_data in metrics_data.get('metrics', {}).items():
-                if metric_data.get('status') != 'success':
-                    continue
-                norm_name = normalize_name(metric_name)
-
-                structured['metrics'][norm_name] = {
-                    'unit': metric_data.get('unit', ''),
-                    'description': metric_data.get('description', ''),
-                    'overall': metric_data.get('overall', {}),
-                    'pods': metric_data.get('pods', {}),
-                    'total_data_points': metric_data.get('total_data_points', 0)
-                }
-            
-            # Create pod-centric view
-            all_pods = set()
-            for metric_name, metric_data in structured['metrics'].items():
+            if metric_name == 'disk_backend_commit_duration_seconds_p99':
+                self._extract_p99_latency(metric_data, structured, pods_by_role)
+            elif metric_name == 'disk_backend_commit_duration_sum_rate':
+                self._extract_duration_sum_rate(metric_data, structured, pods_by_role)
+            elif metric_name == 'disk_backend_commit_duration_sum':
+                self._extract_duration_sum(metric_data, structured, pods_by_role)
+            elif metric_name == 'disk_backend_commit_duration_count_rate':
+                self._extract_count_rate(metric_data, structured, pods_by_role)
+            elif metric_name == 'disk_backend_commit_duration_count':
+                self._extract_count(metric_data, structured, pods_by_role)
+        
+        # Generate overview
+        self._generate_overview(metrics_data, structured, pods_by_role)
+        
+        return structured
+    
+    def _categorize_pods_by_role(self, metrics_data: Dict[str, Any]) -> Dict[str, List[str]]:
+        """Categorize pods by role based on pod names"""
+        pods_by_role = {
+            'controlplane': [],
+            'infra': [],
+            'worker': [],
+            'workload': []
+        }
+        
+        # Collect all unique pod names from all metrics
+        all_pods = set()
+        for metric_data in metrics_data.values():
+            if isinstance(metric_data, dict) and 'pods' in metric_data:
                 all_pods.update(metric_data['pods'].keys())
+        
+        # Categorize pods
+        for pod_name in all_pods:
+            pod_lower = pod_name.lower()
+            if 'master' in pod_lower or 'control' in pod_lower:
+                pods_by_role['controlplane'].append(pod_name)
+            elif 'infra' in pod_lower:
+                pods_by_role['infra'].append(pod_name)
+            elif 'worker' in pod_lower:
+                pods_by_role['worker'].append(pod_name)
+            else:
+                # Default to controlplane for etcd pods
+                pods_by_role['controlplane'].append(pod_name)
+        
+        return pods_by_role
+    
+    def _extract_p99_latency(self, metric_data: Dict[str, Any], 
+                            structured: Dict[str, Any], 
+                            pods_by_role: Dict[str, List[str]]):
+        """Extract P99 latency for each role"""
+        pods_data = metric_data.get('pods', {})
+        
+        for role, pod_list in pods_by_role.items():
+            if not pod_list:
+                continue
             
-            for pod_name in all_pods:
-                structured['pod_metrics'][pod_name] = {}
-                for metric_name, metric_data in structured['metrics'].items():
-                    pod_data = metric_data['pods'].get(pod_name, {})
-                    if pod_data:
-                        structured['pod_metrics'][pod_name][metric_name] = pod_data
+            table_key = f'p99_latency_{role}'
             
-            # Create overall metrics summary
-            for metric_name, metric_data in structured['metrics'].items():
-                overall = metric_data['overall']
-                structured['overall_metrics'][metric_name] = {
-                    'avg': overall.get('avg'),
-                    'max': overall.get('max'),
-                    'min': overall.get('min'),
-                    'latest': overall.get('latest'),
-                    'unit': metric_data.get('unit', '')
-                }
+            # Collect all values for top identification
+            all_values = []
+            for pod_name in pod_list:
+                pod_metrics = pods_data.get(pod_name, {})
+                if pod_metrics:
+                    avg = pod_metrics.get('avg', 0)
+                    max_val = pod_metrics.get('max', 0)
+                    all_values.append((pod_name, avg, max_val))
             
-            return structured
+            # Find top 1 by max value
+            top_max = max((v[2] for v in all_values), default=0) if all_values else 0
             
+            # Format rows
+            thresholds = self.metric_configs['disk_backend_commit_duration_seconds_p99']['thresholds']
+            for pod_name, avg, max_val in all_values:
+                pod_metrics = pods_data.get(pod_name, {})
+                is_top = (max_val == top_max and max_val > 0)
+                
+                # Convert to milliseconds for display
+                avg_ms = avg * 1000
+                max_ms = max_val * 1000
+                min_ms = pod_metrics.get('min', 0) * 1000
+                latest_ms = pod_metrics.get('latest', 0) * 1000
+                
+                structured[table_key].append({
+                    'Pod': self.truncate_node_name(pod_name, 30),
+                    'Avg Latency': self._format_and_highlight_latency(avg_ms, thresholds),
+                    'Max Latency': self._format_and_highlight_latency(max_ms, thresholds, is_top),
+                    'Min Latency': self.format_latency_ms(min_ms / 1000),
+                    'Latest': self.format_latency_ms(latest_ms / 1000),
+                    'Samples': pod_metrics.get('count', 0)
+                })
+    
+    def _extract_duration_sum_rate(self, metric_data: Dict[str, Any], 
+                                   structured: Dict[str, Any], 
+                                   pods_by_role: Dict[str, List[str]]):
+        """Extract duration sum rate for each role"""
+        pods_data = metric_data.get('pods', {})
+        
+        for role, pod_list in pods_by_role.items():
+            if not pod_list:
+                continue
+            
+            table_key = f'duration_sum_rate_{role}'
+            
+            all_values = []
+            for pod_name in pod_list:
+                pod_metrics = pods_data.get(pod_name, {})
+                if pod_metrics:
+                    max_val = pod_metrics.get('max', 0)
+                    all_values.append((pod_name, max_val))
+            
+            top_max = max((v[1] for v in all_values), default=0) if all_values else 0
+            
+            for pod_name, max_val in all_values:
+                pod_metrics = pods_data.get(pod_name, {})
+                is_top = (max_val == top_max and max_val > 0)
+                
+                avg_display = self.format_latency_seconds(pod_metrics.get('avg', 0))
+                max_display = self.format_latency_seconds(max_val)
+                if is_top:
+                    max_display = f'<span class="text-primary font-weight-bold bg-light px-1">🏆 {max_display}</span>'
+                
+                structured[table_key].append({
+                    'Pod': self.truncate_node_name(pod_name, 30),
+                    'Avg Rate': avg_display,
+                    'Max Rate': max_display,
+                    'Min Rate': self.format_latency_seconds(pod_metrics.get('min', 0)),
+                    'Latest': self.format_latency_seconds(pod_metrics.get('latest', 0)),
+                    'Samples': pod_metrics.get('count', 0)
+                })
+    
+    def _extract_duration_sum(self, metric_data: Dict[str, Any], 
+                             structured: Dict[str, Any], 
+                             pods_by_role: Dict[str, List[str]]):
+        """Extract total duration sum for each role"""
+        pods_data = metric_data.get('pods', {})
+        
+        for role, pod_list in pods_by_role.items():
+            if not pod_list:
+                continue
+            
+            table_key = f'duration_sum_{role}'
+            
+            all_values = []
+            for pod_name in pod_list:
+                pod_metrics = pods_data.get(pod_name, {})
+                if pod_metrics:
+                    latest = pod_metrics.get('latest', 0)
+                    all_values.append((pod_name, latest))
+            
+            top_latest = max((v[1] for v in all_values), default=0) if all_values else 0
+            
+            for pod_name, latest in all_values:
+                pod_metrics = pods_data.get(pod_name, {})
+                is_top = (latest == top_latest and latest > 0)
+                
+                latest_display = f"{latest:.2f} s"
+                if is_top:
+                    latest_display = f'<span class="text-primary font-weight-bold bg-light px-1">🏆 {latest_display}</span>'
+                
+                structured[table_key].append({
+                    'Pod': self.truncate_node_name(pod_name, 30),
+                    'Total Duration': latest_display,
+                    'Avg Duration': f"{pod_metrics.get('avg', 0):.2f} s",
+                    'Max Duration': f"{pod_metrics.get('max', 0):.2f} s",
+                    'Samples': pod_metrics.get('count', 0)
+                })
+    
+    def _extract_count_rate(self, metric_data: Dict[str, Any], 
+                           structured: Dict[str, Any], 
+                           pods_by_role: Dict[str, List[str]]):
+        """Extract commit count rate for each role"""
+        pods_data = metric_data.get('pods', {})
+        
+        for role, pod_list in pods_by_role.items():
+            if not pod_list:
+                continue
+            
+            table_key = f'count_rate_{role}'
+            
+            all_values = []
+            for pod_name in pod_list:
+                pod_metrics = pods_data.get(pod_name, {})
+                if pod_metrics:
+                    max_val = pod_metrics.get('max', 0)
+                    all_values.append((pod_name, max_val))
+            
+            top_max = max((v[1] for v in all_values), default=0) if all_values else 0
+            
+            for pod_name, max_val in all_values:
+                pod_metrics = pods_data.get(pod_name, {})
+                is_top = (max_val == top_max and max_val > 0)
+                
+                max_display = self.format_operations_per_second(max_val)
+                if is_top:
+                    max_display = f'<span class="text-primary font-weight-bold bg-light px-1">🏆 {max_display}</span>'
+                
+                structured[table_key].append({
+                    'Pod': self.truncate_node_name(pod_name, 30),
+                    'Avg Rate': self.format_operations_per_second(pod_metrics.get('avg', 0)),
+                    'Max Rate': max_display,
+                    'Min Rate': self.format_operations_per_second(pod_metrics.get('min', 0)),
+                    'Latest': self.format_operations_per_second(pod_metrics.get('latest', 0)),
+                    'Samples': pod_metrics.get('count', 0)
+                })
+    
+    def _extract_count(self, metric_data: Dict[str, Any], 
+                      structured: Dict[str, Any], 
+                      pods_by_role: Dict[str, List[str]]):
+        """Extract total commit count for each role"""
+        pods_data = metric_data.get('pods', {})
+        
+        for role, pod_list in pods_by_role.items():
+            if not pod_list:
+                continue
+            
+            table_key = f'count_{role}'
+            
+            all_values = []
+            for pod_name in pod_list:
+                pod_metrics = pods_data.get(pod_name, {})
+                if pod_metrics:
+                    latest = pod_metrics.get('latest', 0)
+                    all_values.append((pod_name, latest))
+            
+            top_latest = max((v[1] for v in all_values), default=0) if all_values else 0
+            
+            for pod_name, latest in all_values:
+                pod_metrics = pods_data.get(pod_name, {})
+                is_top = (latest == top_latest and latest > 0)
+                
+                latest_display = self.format_count_value(latest)
+                if is_top:
+                    latest_display = f'<span class="text-primary font-weight-bold bg-light px-1">🏆 {latest_display}</span>'
+                
+                structured[table_key].append({
+                    'Pod': self.truncate_node_name(pod_name, 30),
+                    'Total Operations': latest_display,
+                    'Avg Operations': self.format_count_value(pod_metrics.get('avg', 0)),
+                    'Max Operations': self.format_count_value(pod_metrics.get('max', 0)),
+                    'Samples': pod_metrics.get('count', 0)
+                })
+    
+    def _format_and_highlight_latency(self, value_ms: float, 
+                                     thresholds: Dict[str, float], 
+                                     is_top: bool = False) -> str:
+        """Format and highlight latency value"""
+        formatted = self.format_latency_ms(value_ms / 1000)
+        threshold_ms = {k: v * 1000 for k, v in thresholds.items()}
+        
+        if is_top:
+            return f'<span class="text-primary font-weight-bold bg-light px-1">🏆 {formatted}</span>'
+        elif value_ms >= threshold_ms.get('critical', float('inf')):
+            return f'<span class="text-danger font-weight-bold">⚠️ {formatted}</span>'
+        elif value_ms >= threshold_ms.get('warning', float('inf')):
+            return f'<span class="text-warning font-weight-bold">{formatted}</span>'
+        else:
+            return f'<span class="text-success">{formatted}</span>'
+    
+    def _generate_overview(self, metrics_data: Dict[str, Any], 
+                          structured: Dict[str, Any], 
+                          pods_by_role: Dict[str, List[str]]):
+        """Generate backend commit overview"""
+        for role, pod_list in pods_by_role.items():
+            if not pod_list:
+                continue
+            
+            metrics_count = sum(1 for m in metrics_data.values() 
+                              if m.get('status') == 'success')
+            
+            structured['backend_commit_overview'].append({
+                'Role': role.title(),
+                'Pods': len(pod_list),
+                'Metrics Collected': metrics_count,
+                'Status': self.create_status_badge('success', 'Active')
+            })
+    
+    def summarize_backend_commit(self, data: Dict[str, Any]) -> str:
+        """Generate backend commit summary as HTML"""
+        try:
+            summary_items: List[str] = []
+            
+            overview_data = data.get('backend_commit_overview', [])
+            
+            total_pods = sum(int(item.get('Pods', 0)) for item in overview_data)
+            if total_pods > 0:
+                summary_items.append(f"<li>Total etcd Pods: {total_pods}</li>")
+            
+            # Role breakdown
+            for item in overview_data:
+                role = item.get('Role', 'Unknown')
+                pods = item.get('Pods', 0)
+                metrics = item.get('Metrics Collected', 0)
+                if pods > 0:
+                    summary_items.append(f"<li>{role}: {pods} pods, {metrics} metrics</li>")
+            
+            return (
+                "<div class=\"backend-commit-summary\">"
+                "<h4>Backend Commit Metrics Summary:</h4>"
+                "<ul>" + "".join(summary_items) + "</ul>"
+                "</div>"
+            )
+        
         except Exception as e:
-            logger.error(f"Error extracting backend commit data: {e}")
-            return {'error': str(e)}
+            logger.error(f"Failed to generate backend commit summary: {e}")
+            return f"Backend commit metrics collected from {len(data)} role groups"
     
     def transform_to_dataframes(self, structured_data: Dict[str, Any]) -> Dict[str, pd.DataFrame]:
-        """Transform structured backend commit data to DataFrames"""
+        """Transform structured data into pandas DataFrames"""
+        dataframes = {}
+        
         try:
-            dataframes = {}
-            
-            # 1. Metrics Overview Table
-            overview_data = []
-            for metric_name, metric_data in structured_data.get('overall_metrics', {}).items():
-                metric_display = self._format_metric_name(metric_name)
-                unit = metric_data.get('unit', '')
-                
-                overview_data.append({
-                    'Metric': metric_display,
-                    'Average': self._format_backend_commit_value(metric_data.get('avg'), unit),
-                    'Maximum': self._format_backend_commit_value(metric_data.get('max'), unit),
-                    'Minimum': self._format_backend_commit_value(metric_data.get('min'), unit),
-                    'Latest': self._format_backend_commit_value(metric_data.get('latest'), unit),
-                    'Unit': unit
-                })
-            
-            if overview_data:
-                df_overview = pd.DataFrame(overview_data)
-                dataframes['metrics_overview'] = self.limit_dataframe_columns(df_overview, table_name='metrics_overview')
-            
-            # 2. Pod Performance Table
-            pod_data = []
-            for pod_name, pod_metrics in structured_data.get('pod_metrics', {}).items():
-                pod_display = self.truncate_node_name(pod_name, 30)
-                
-                # Get key metrics for this pod
-                p99_data = pod_metrics.get('disk_backend_commit_duration_seconds_p99', {})
-                rate_data = pod_metrics.get('backend_commit_duration_count_rate', {})
-                
-                pod_data.append({
-                    'Pod': pod_display,
-                    'P99 Latency (avg)': self._format_backend_commit_value(p99_data.get('avg'), 'seconds'),
-                    'P99 Latency (max)': self._format_backend_commit_value(p99_data.get('max'), 'seconds'),
-                    'Commit Rate (avg)': self._format_backend_commit_value(rate_data.get('avg'), 'ops/sec'),
-                    'Commit Rate (max)': self._format_backend_commit_value(rate_data.get('max'), 'ops/sec'),
-                    'Data Points': p99_data.get('count', 0)
-                })
-            
-            if pod_data:
-                df_pods = pd.DataFrame(pod_data)
-                # Identify top performers
-                top_latency_indices = self.identify_top_values(pod_data, 'P99 Latency (max)')
-                top_rate_indices = self.identify_top_values(pod_data, 'Commit Rate (max)')
-                
-                # Highlight values
-                for i, row in df_pods.iterrows():
-                    is_top_latency = i in top_latency_indices
-                    is_top_rate = i in top_rate_indices
-                    
-                    if is_top_latency:
-                        df_pods.at[i, 'P99 Latency (max)'] = self.highlight_backend_commit_values(
-                            self.extract_numeric_value(row['P99 Latency (max)']), 'latency', 'ms', True)
-                    if is_top_rate:
-                        df_pods.at[i, 'Commit Rate (max)'] = self.highlight_backend_commit_values(
-                            self.extract_numeric_value(row['Commit Rate (max)']), 'rate', 'ops/sec', True)
-                
-                dataframes['pod_performance'] = self.limit_dataframe_columns(df_pods, table_name='pod_performance')
-            
-            # 3. Latency Details Table
-            latency_data = []
-            p99_metric = structured_data.get('metrics', {}).get('disk_backend_commit_duration_seconds_p99', {})
-            
-            for pod_name, pod_data in p99_metric.get('pods', {}).items():
-                pod_display = self.truncate_node_name(pod_name, 30)
-                
-                latency_data.append({
-                    'Pod': pod_display,
-                    'Average (ms)': self._format_latency_ms(pod_data.get('avg')),
-                    'Maximum (ms)': self._format_latency_ms(pod_data.get('max')),
-                    'Minimum (ms)': self._format_latency_ms(pod_data.get('min')),
-                    'Latest (ms)': self._format_latency_ms(pod_data.get('latest')),
-                    'Sample Count': pod_data.get('count', 0)
-                })
-            
-            if latency_data:
-                df_latency = pd.DataFrame(latency_data)
-                # Highlight critical latencies (>50ms is critical, >20ms is warning)
-                for i, row in df_latency.iterrows():
-                    max_val = self.extract_numeric_value(row['Maximum (ms)'])
-                    avg_val = self.extract_numeric_value(row['Average (ms)'])
-                    
-                    df_latency.at[i, 'Maximum (ms)'] = self.highlight_backend_commit_values(
-                        max_val, 'latency', 'ms', max_val == df_latency['Maximum (ms)'].apply(self.extract_numeric_value).max())
-                    df_latency.at[i, 'Average (ms)'] = self.highlight_backend_commit_values(
-                        avg_val, 'latency', 'ms')
-                
-                dataframes['latency_details'] = self.limit_dataframe_columns(df_latency, table_name='latency_details')
-            
-            # 4. Operations Rate Table
-            ops_data = []
-            count_rate_metric = structured_data.get('metrics', {}).get('backend_commit_duration_count_rate', {})
-            
-            for pod_name, pod_data in count_rate_metric.get('pods', {}).items():
-                pod_display = self.truncate_node_name(pod_name, 30)
-                
-                ops_data.append({
-                    'Pod': pod_display,
-                    'Avg Rate': self.format_operations_per_second(pod_data.get('avg', 0)),
-                    'Max Rate': self.format_operations_per_second(pod_data.get('max', 0)),
-                    'Min Rate': self.format_operations_per_second(pod_data.get('min', 0)),
-                    'Latest Rate': self.format_operations_per_second(pod_data.get('latest', 0)),
-                    'Sample Count': pod_data.get('count', 0)
-                })
-            
-            if ops_data:
-                df_ops = pd.DataFrame(ops_data)
-                # Highlight top performers
-                top_ops_indices = self.identify_top_values(ops_data, 'Max Rate')
-                
-                for i, row in df_ops.iterrows():
-                    is_top = i in top_ops_indices
-                    max_val = self.extract_numeric_value(row['Max Rate'])
-                    
-                    df_ops.at[i, 'Max Rate'] = self.highlight_backend_commit_values(
-                        max_val, 'rate', 'ops/sec', is_top)
-                
-                dataframes['operations_rate'] = self.limit_dataframe_columns(df_ops, table_name='operations_rate')
-            
-            # 5. Cumulative Metrics Table
-            cumulative_data = []
-            sum_metric = structured_data.get('metrics', {}).get('backend_commit_duration_sum', {})
-            count_metric = structured_data.get('metrics', {}).get('backend_commit_duration_count', {})
-            
-            for pod_name in structured_data.get('pod_metrics', {}).keys():
-                pod_display = self.truncate_node_name(pod_name, 30)
-                sum_data = sum_metric.get('pods', {}).get(pod_name, {})
-                count_data = count_metric.get('pods', {}).get(pod_name, {})
-                
-                cumulative_data.append({
-                    'Pod': pod_display,
-                    'Total Duration (s)': f"{sum_data.get('latest', 0):.2f}",
-                    'Total Operations': f"{count_data.get('latest', 0):,}",
-                    'Avg Duration (s)': f"{sum_data.get('avg', 0):.2f}",
-                    'Avg Operations': f"{count_data.get('avg', 0):,.0f}"
-                })
-            
-            if cumulative_data:
-                df_cumulative = pd.DataFrame(cumulative_data)
-                dataframes['cumulative_metrics'] = self.limit_dataframe_columns(df_cumulative, table_name='cumulative_metrics')
-            
-            return dataframes
-            
+            for key, value in structured_data.items():
+                if isinstance(value, list) and value:
+                    df = pd.DataFrame(value)
+                    if not df.empty:
+                        # Decode unicode in object columns
+                        for col in df.columns:
+                            if df[col].dtype == 'object':
+                                df[col] = df[col].astype(str).apply(self.decode_unicode_escapes)
+                        
+                        dataframes[key] = df
+        
         except Exception as e:
-            logger.error(f"Error transforming backend commit data to DataFrames: {e}")
-            return {}
+            logger.error(f"Failed to transform backend commit data to DataFrames: {e}")
+        
+        return dataframes
     
     def generate_html_tables(self, dataframes: Dict[str, pd.DataFrame]) -> Dict[str, str]:
-        """Generate HTML tables for backend commit metrics"""
-        try:
-            html_tables = {}
-            
-            for table_name, df in dataframes.items():
-                if df.empty:
-                    continue
-                
-                html_tables[table_name] = self.create_html_table(df, table_name)
-            
-            return html_tables
-            
-        except Exception as e:
-            logger.error(f"Error generating HTML tables for backend commit: {e}")
-            return {}
-    
-    def summarize_backend_commit(self, structured_data: Dict[str, Any]) -> str:
-        """Generate summary for backend commit metrics"""
-        try:
-            summary_parts = ["Backend Commit Performance Summary:"]
-            
-            # Basic info
-            total_pods = len(structured_data.get('pod_metrics', {}))
-            summary_parts.append(f"• Monitoring {total_pods} etcd pods")
-            
-            # Key performance indicators
-            overall_metrics = structured_data.get('overall_metrics', {})
-            
-            # P99 latency summary
-            p99_data = overall_metrics.get('disk_backend_commit_duration_seconds_p99', {})
-            if p99_data:
-                avg_latency_ms = (p99_data.get('avg', 0) * 1000)
-                max_latency_ms = (p99_data.get('max', 0) * 1000)
-                summary_parts.append(f"• Average P99 latency: {avg_latency_ms:.2f}ms (max: {max_latency_ms:.2f}ms)")
-            
-            # Commit rate summary
-            rate_data = overall_metrics.get('backend_commit_duration_count_rate', {})
-            if rate_data:
-                avg_rate = rate_data.get('avg', 0)
-                max_rate = rate_data.get('max', 0)
-                summary_parts.append(f"• Average commit rate: {avg_rate:.1f} ops/sec (peak: {max_rate:.1f} ops/sec)")
-            
-            # Total operations
-            count_data = overall_metrics.get('backend_commit_duration_count', {})
-            if count_data:
-                total_ops = count_data.get('latest', 0)
-                summary_parts.append(f"• Total backend commits: {total_ops:,}")
-            
-            # Performance assessment
-            if p99_data:
-                avg_latency_ms = (p99_data.get('avg', 0) * 1000)
-                if avg_latency_ms > 50:
-                    summary_parts.append("⚠️ High backend commit latency detected")
-                elif avg_latency_ms > 20:
-                    summary_parts.append("⚡ Moderate backend commit latency")
-                else:
-                    summary_parts.append("✅ Good backend commit performance")
-            
-            return " ".join(summary_parts)
-            
-        except Exception as e:
-            logger.error(f"Error generating backend commit summary: {e}")
-            return f"Summary generation failed: {str(e)}"
-    
-    def _format_metric_name(self, metric_name: str) -> str:
-        """Format metric name for display"""
-        name_mapping = {
-            'disk_backend_commit_duration_seconds_p99': 'P99 Commit Duration',
-            'backend_commit_duration_sum_rate': 'Duration Sum Rate',
-            'backend_commit_duration_sum': 'Total Duration Sum',
-            'backend_commit_duration_count_rate': 'Commit Rate',
-            'backend_commit_duration_count': 'Total Commits'
-        }
-        return name_mapping.get(metric_name, metric_name.replace('_', ' ').title())
-    
-    def _format_backend_commit_value(self, value: Union[float, int, None], unit: str) -> str:
-        """Format backend commit metric value with appropriate units"""
-        if value is None:
-            return "N/A"
+        """Generate HTML tables from DataFrames grouped by metric and role"""
+        html_tables = {}
         
-        try:
-            if unit == 'seconds':
-                if value < 0.001:
-                    return f"{value*1000000:.0f} μs"
-                elif value < 1:
-                    return f"{value*1000:.3f} ms"
-                else:
-                    return f"{value:.6f} s"
-            elif unit == 'count' or unit == 'ops/sec':
-                if isinstance(value, float) and value < 10:
-                    return f"{value:.2f}"
-                else:
-                    return f"{value:,.0f}"
-            else:
-                return f"{value:.3f}"
-        except (ValueError, TypeError):
-            return str(value)
-    
-    def _format_latency_ms(self, value: Union[float, int, None]) -> str:
-        """Format latency value in milliseconds"""
-        if value is None:
-            return "N/A"
-        try:
-            return f"{value * 1000:.3f}"
-        except (ValueError, TypeError):
-            return str(value)
-    
-    def highlight_backend_commit_values(self, value: Union[float, int], metric_type: str, unit: str = "", is_top: bool = False) -> str:
-        """Highlight backend commit values with metric-specific thresholds"""
-        try:
-            thresholds = self._get_backend_commit_thresholds(metric_type)
-            
-            if is_top:
-                formatted_value = self._format_backend_commit_display_value(float(value), metric_type, unit)
-                return f'<span class="text-primary font-weight-bold bg-light px-1">🏆 {formatted_value}</span>'
-            
-            if thresholds and isinstance(value, (int, float)):
-                critical = thresholds.get('critical', float('inf'))
-                warning = thresholds.get('warning', float('inf'))
-                
-                formatted_value = self._format_backend_commit_display_value(float(value), metric_type, unit)
-                
-                if value >= critical:
-                    return f'<span class="text-danger font-weight-bold">⚠️ {formatted_value}</span>'
-                elif value >= warning:
-                    return f'<span class="text-warning font-weight-bold">{formatted_value}</span>'
-                else:
-                    return f'<span class="text-success">{formatted_value}</span>'
-            else:
-                return self._format_backend_commit_display_value(float(value), metric_type, unit)
-                
-        except (ValueError, TypeError):
-            return str(value)
-    
-    def _get_backend_commit_thresholds(self, metric_type: str) -> Dict[str, float]:
-        """Get thresholds for backend commit metrics"""
-        thresholds_map = {
-            'latency': {'warning': 20, 'critical': 50},  # milliseconds
-            'rate': {'warning': 1000, 'critical': 2000}  # ops/sec - high might indicate issues
+        # Define metric groups
+        metric_groups = {
+            'P99 Commit Latency': 'p99_latency',
+            'Duration Sum Rate': 'duration_sum_rate',
+            'Total Duration Sum': 'duration_sum',
+            'Commit Operations Rate': 'count_rate',
+            'Total Commit Operations': 'count'
         }
         
-        return thresholds_map.get(metric_type, {})
-    
-    def _format_backend_commit_display_value(self, value: float, metric_type: str, unit: str) -> str:
-        """Format backend commit value for display"""
-        if metric_type == 'latency' and unit == 'ms':
-            return f"{value:.3f} ms"
-        elif metric_type == 'rate' and unit == 'ops/sec':
-            return self.format_operations_per_second(value)
-        elif metric_type == 'count':
-            return self.format_count_value(value)
-        else:
-            return f"{value:.3f}"
-    
-    def categorize_backend_commit_metric(self, metric_name: str) -> str:
-        """Categorize backend commit metric type"""
-        metric_lower = metric_name.lower()
+        try:
+            # Overview table first
+            if 'backend_commit_overview' in dataframes and not dataframes['backend_commit_overview'].empty:
+                html_tables['backend_commit_overview'] = self.create_html_table(
+                    dataframes['backend_commit_overview'], 
+                    'Backend Commit Overview'
+                )
+            
+            # Generate tables for each metric group and role
+            for metric_name, metric_prefix in metric_groups.items():
+                for role in ['controlplane', 'infra', 'worker', 'workload']:
+                    table_key = f'{metric_prefix}_{role}'
+                    if table_key in dataframes and not dataframes[table_key].empty:
+                        display_name = f"{metric_name} - {role.title()}"
+                        html_tables[table_key] = self.create_html_table(
+                            dataframes[table_key], 
+                            display_name
+                        )
         
-        if 'p99' in metric_lower or 'duration' in metric_lower and 'rate' not in metric_lower:
-            return 'Latency'
-        elif 'sum_rate' in metric_lower or 'rate' in metric_lower:
-            return 'Rate/Throughput'  
-        elif 'count' in metric_lower and 'rate' not in metric_lower:
-            return 'Cumulative'
-        elif 'sum' in metric_lower and 'rate' not in metric_lower:
-            return 'Cumulative Duration'
-        else:
-            return 'Other'
+        except Exception as e:
+            logger.error(f"Failed to generate HTML tables for backend commit: {e}")
+        
+        return html_tables
