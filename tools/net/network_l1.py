@@ -2,6 +2,7 @@
 """
 Network L1 Metrics Collector (PromQL)
 Renamed from: ovnk_benchmark_prometheus_network_l1.py
+Updated to use OpenShift route-based Prometheus discovery
 """
 
 import asyncio
@@ -16,7 +17,7 @@ logging.basicConfig(level=logging.INFO)
 class NetworkL1Collector:
     """Collector for Network Layer 1 metrics"""
     
-    def __init__(self, prometheus_client, config, utility):
+    def __init__(self, prometheus_client, config, utility, openshift_auth=None):
         """
         Initialize Network L1 Collector
         
@@ -24,15 +25,68 @@ class NetworkL1Collector:
             prometheus_client: PrometheusBaseQuery instance
             config: Config instance
             utility: mcpToolsUtility instance
+            openshift_auth: OpenShiftAuth instance (optional, for route discovery)
         """
         self.prometheus_client = prometheus_client
         self.config = config
         self.utility = utility
+        self.openshift_auth = openshift_auth
         self.category = "network_l1"
         
         # Get metrics for this category
         self.metrics = self.config.get_metrics_by_category(self.category)
         logger.info(f"Initialized NetworkL1Collector with {len(self.metrics)} metrics")
+        
+        # Flag to track if we've already tried to update Prometheus URL
+        self._prometheus_url_updated = False
+    
+    async def _ensure_prometheus_connectivity(self):
+        """
+        Ensure Prometheus is reachable, using route discovery if needed.
+        This method updates the prometheus_client URL if the current one is failing.
+        """
+        if self._prometheus_url_updated:
+            return  # Already attempted update
+        
+        if not self.openshift_auth:
+            logger.warning("OpenShiftAuth not provided, cannot discover Prometheus route")
+            return
+        
+        try:
+            # Check if OpenShiftAuth has already discovered Prometheus
+            if not self.openshift_auth.prometheus_url:
+                logger.info("Prometheus URL not yet discovered, initializing OpenShift authentication...")
+                await self.openshift_auth.initialize()
+            
+            # Get Prometheus config from OpenShiftAuth (includes route-based URL and fallbacks)
+            prom_config = self.openshift_auth.get_prometheus_config()
+            new_url = prom_config.get('url')
+            fallback_urls = prom_config.get('fallback_urls', [])
+            
+            if new_url and new_url != self.prometheus_client.base_url:
+                logger.info(f"Updating Prometheus URL from '{self.prometheus_client.base_url}' to '{new_url}' (route-based)")
+                self.prometheus_client.base_url = new_url
+                
+                # Update token if available
+                if prom_config.get('token'):
+                    self.prometheus_client.token = prom_config['token']
+                    logger.info("Updated Prometheus authentication token")
+                
+                # Update verification settings
+                if 'verify' in prom_config:
+                    self.prometheus_client.verify = prom_config['verify']
+                    logger.info(f"Updated Prometheus TLS verification: {prom_config['verify']}")
+                
+                # Store fallback URLs if the client supports them
+                if hasattr(self.prometheus_client, 'fallback_urls'):
+                    self.prometheus_client.fallback_urls = fallback_urls
+                    logger.info(f"Configured {len(fallback_urls)} fallback URLs")
+            
+            self._prometheus_url_updated = True
+            
+        except Exception as e:
+            logger.error(f"Error updating Prometheus connectivity: {e}")
+            # Don't raise - allow collection to proceed with existing config
     
     async def collect_all_metrics(self, duration: str = "5m") -> Dict[str, Any]:
         """
@@ -45,6 +99,9 @@ class NetworkL1Collector:
             JSON formatted results grouped by node role
         """
         try:
+            # Ensure Prometheus connectivity before collecting metrics
+            await self._ensure_prometheus_connectivity()
+            
             # Get node groups
             node_groups = await self.utility.get_node_groups(self.prometheus_client)
             
@@ -380,5 +437,3 @@ class NetworkL1Collector:
             sorted_nodes = sorted(nodes, key=lambda x: x['name'])
             return sorted_nodes[:3]
         return nodes
-
-
