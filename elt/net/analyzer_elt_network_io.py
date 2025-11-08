@@ -83,6 +83,9 @@ class networkIOELT(utilityELT):
     def extract_network_io(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Extract network I/O information from network_io.py output"""
         
+        # Accept both top-level and nested 'data' payloads
+        payload = data.get('data', data) or {}
+        
         structured = {
             'network_io_overview': []
         }
@@ -93,7 +96,7 @@ class networkIOELT(utilityELT):
                 table_key = f'{metric_name}_{role}'
                 structured[table_key] = []
         
-        metrics = data.get('metrics', {})
+        metrics = payload.get('metrics', {})
         
         # Process each metric
         for metric_name, metric_data in metrics.items():
@@ -181,14 +184,16 @@ class networkIOELT(utilityELT):
     
     def _generate_overview(self, data: Dict[str, Any], structured: Dict[str, Any]):
         """Generate network I/O overview"""
-        summary = data.get('summary', {})
+        # Support both top-level and nested 'data' payloads
+        payload = data.get('data', data) or {}
+        summary = payload.get('summary', {})
         
         overview = {
             'Total Metrics': summary.get('total_metrics', 0),
             'Metrics with Data': summary.get('with_data', 0),
             'Empty Metrics': summary.get('empty', 0),
             'Errors': summary.get('errors', 0),
-            'Duration': data.get('duration', 'N/A'),
+            'Duration': payload.get('duration', data.get('duration', 'N/A')),
             'Status': self.create_status_badge('success', 'Complete') if summary.get('errors', 0) == 0 else self.create_status_badge('warning', 'With Errors')
         }
         
