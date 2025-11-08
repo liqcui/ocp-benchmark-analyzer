@@ -411,19 +411,18 @@ async def get_ocp_cluster_info(request: OCPClusterInfoRequest) -> OCPClusterInfo
 @mcp.tool()
 async def get_network_io_node(request: NetworkIORequest) -> NetworkMetricsResponse:
     """
-    Get comprehensive cluster network I/O metrics and performance statistics.
+    Get comprehensive cluster node level network I/O metrics and performance statistics.
     
     Monitors network performance metrics including:
-    - RX/TX bandwidth utilization (bits per second)
-    - RX/TX packet rates (packets per second)
-    - Packet drops and errors (indicating congestion or issues)
-    - Network saturation metrics (percentage of capacity)
-    - Interface status (up/down, carrier detection)
-    - Network speed configuration
-    - gRPC active streams (API server load)
-    - Connection tracking (conntrack entries and limits)
-    - ARP table statistics
-    - FIFO queue depths
+    - RX/TX bandwidth utilization on ocp node level(bits per second)
+    - RX/TX packet rates  on ocp node level(packets per second)
+    - Packet drops and errors on ocp node level(indicating congestion or issues)
+    - Network saturation metrics  on ocp node level(percentage of capacity)
+    - Interface status on ocp node level(up/down, carrier detection)
+    - Network speed configuration on ocp node level
+    - Connection tracking (conntrack entries and limits) on ocp node level
+    - ARP table statistics on ocp node level
+    - FIFO queue depths on ocp node level
     
     Metrics organized by node role with avg/max statistics.
     Worker nodes show top 3 performers.
