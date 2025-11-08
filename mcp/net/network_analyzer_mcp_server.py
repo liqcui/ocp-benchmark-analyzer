@@ -398,7 +398,91 @@ async def get_ocp_cluster_info(request: OCPClusterInfoRequest) -> OCPClusterInfo
         )
 
 @mcp.tool()
-async def get_network_l1_metrics(request: NetworkL1Request) -> NetworkMetricsResponse:
+async def get_network_io_node(request: NetworkIORequest) -> NetworkMetricsResponse:
+    """
+    Get comprehensive cluster network I/O metrics and performance statistics.
+    
+    Monitors network performance metrics including:
+    - RX/TX bandwidth utilization (bits per second)
+    - RX/TX packet rates (packets per second)
+    - Packet drops and errors (indicating congestion or issues)
+    - Network saturation metrics (percentage of capacity)
+    - Interface status (up/down, carrier detection)
+    - Network speed configuration
+    - gRPC active streams (API server load)
+    - Connection tracking (conntrack entries and limits)
+    - ARP table statistics
+    - FIFO queue depths
+    
+    Metrics organized by node role with avg/max statistics.
+    Worker nodes show top 3 performers.
+    
+    USE CASES:
+    - Network bottleneck identification and saturation analysis
+    - Packet drop troubleshooting and congestion detection
+    - Connection tracking table utilization monitoring
+    - Network capacity planning for infrastructure upgrades
+    - API server network load analysis via gRPC streams
+    - Interface health and carrier status monitoring
+    - Network performance baseline establishment
+    
+    Args:
+        duration: Time range for metrics (e.g., '5m', '15m', '1h', '6h', '1d'). Default: '5m'
+        start_time: Optional start time in ISO format (YYYY-MM-DDTHH:MM:SSZ)
+        end_time: Optional end time in ISO format (YYYY-MM-DDTHH:MM:SSZ)
+    
+    Returns:
+        NetworkMetricsResponse: Network I/O performance metrics grouped by node role
+    """
+    global prometheus_client, auth_manager, config
+    duration = request.duration
+    try:
+        if not prometheus_client or not auth_manager or not config:
+            await initialize_components()
+        
+        collector = NetworkIOCollector(
+            prometheus_url=auth_manager.prometheus_url,
+            token=auth_manager.prometheus_token,
+            config=config
+        )
+        
+        try:
+            await collector.initialize()
+            network_data = await asyncio.wait_for(
+                collector.collect_all_metrics(duration=duration), timeout=60.0
+            )
+            
+            return NetworkMetricsResponse(
+                status="success",
+                data=network_data,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                category="network_io",
+                duration=duration
+            )
+            
+        finally:
+            await collector.close()
+        
+    except asyncio.TimeoutError:
+        return NetworkMetricsResponse(
+            status="error",
+            error="Timeout collecting network I/O metrics",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            category="network_io",
+            duration=duration
+        )
+    except Exception as e:
+        logger.error(f"Error collecting network I/O: {e}")
+        return NetworkMetricsResponse(
+            status="error",
+            error=str(e),
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            category="network_io",
+            duration=duration
+        )
+
+@mcp.tool()
+async def get_network_l1_stats(request: NetworkL1Request) -> NetworkMetricsResponse:
     """
     Get comprehensive Layer 1 network metrics across all cluster nodes.
     
@@ -491,90 +575,6 @@ async def get_network_l1_metrics(request: NetworkL1Request) -> NetworkMetricsRes
             error=str(e),
             timestamp=datetime.now(timezone.utc).isoformat(),
             category="network_l1",
-            duration=duration
-        )
-
-@mcp.tool()
-async def get_cluster_network_io(request: NetworkIORequest) -> NetworkMetricsResponse:
-    """
-    Get comprehensive cluster network I/O metrics and performance statistics.
-    
-    Monitors network performance metrics including:
-    - RX/TX bandwidth utilization (bits per second)
-    - RX/TX packet rates (packets per second)
-    - Packet drops and errors (indicating congestion or issues)
-    - Network saturation metrics (percentage of capacity)
-    - Interface status (up/down, carrier detection)
-    - Network speed configuration
-    - gRPC active streams (API server load)
-    - Connection tracking (conntrack entries and limits)
-    - ARP table statistics
-    - FIFO queue depths
-    
-    Metrics organized by node role with avg/max statistics.
-    Worker nodes show top 3 performers.
-    
-    USE CASES:
-    - Network bottleneck identification and saturation analysis
-    - Packet drop troubleshooting and congestion detection
-    - Connection tracking table utilization monitoring
-    - Network capacity planning for infrastructure upgrades
-    - API server network load analysis via gRPC streams
-    - Interface health and carrier status monitoring
-    - Network performance baseline establishment
-    
-    Args:
-        duration: Time range for metrics (e.g., '5m', '15m', '1h', '6h', '1d'). Default: '5m'
-        start_time: Optional start time in ISO format (YYYY-MM-DDTHH:MM:SSZ)
-        end_time: Optional end time in ISO format (YYYY-MM-DDTHH:MM:SSZ)
-    
-    Returns:
-        NetworkMetricsResponse: Network I/O performance metrics grouped by node role
-    """
-    global prometheus_client, auth_manager, config
-    duration = request.duration
-    try:
-        if not prometheus_client or not auth_manager or not config:
-            await initialize_components()
-        
-        collector = NetworkIOCollector(
-            prometheus_url=auth_manager.prometheus_url,
-            token=auth_manager.prometheus_token,
-            config=config
-        )
-        
-        try:
-            await collector.initialize()
-            network_data = await asyncio.wait_for(
-                collector.collect_all_metrics(duration=duration), timeout=60.0
-            )
-            
-            return NetworkMetricsResponse(
-                status="success",
-                data=network_data,
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                category="network_io",
-                duration=duration
-            )
-            
-        finally:
-            await collector.close()
-        
-    except asyncio.TimeoutError:
-        return NetworkMetricsResponse(
-            status="error",
-            error="Timeout collecting network I/O metrics",
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            category="network_io",
-            duration=duration
-        )
-    except Exception as e:
-        logger.error(f"Error collecting network I/O: {e}")
-        return NetworkMetricsResponse(
-            status="error",
-            error=str(e),
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            category="network_io",
             duration=duration
         )
 
@@ -854,7 +854,7 @@ async def get_network_socket_softnet_stats(request: NetworkSocketSoftnetRequest)
         )
 
 @mcp.tool()
-async def get_network_socket_ip_metrics(request: NetworkSocketIPRequest) -> NetworkMetricsResponse:
+async def get_network_socket_ip_stats(request: NetworkSocketIPRequest) -> NetworkMetricsResponse:
     """
     Get network socket IP-level statistics and ICMP metrics.
     
@@ -930,7 +930,7 @@ async def get_network_socket_ip_metrics(request: NetworkSocketIPRequest) -> Netw
         )
 
 @mcp.tool()
-async def get_network_netstat_tcp_metrics(request: NetStatTCPRequest) -> NetworkMetricsResponse:
+async def get_network_netstat_tcp_stats(request: NetStatTCPRequest) -> NetworkMetricsResponse:
     """
     Get comprehensive network netstat TCP metrics and connection statistics.
     
@@ -1010,7 +1010,7 @@ async def get_network_netstat_tcp_metrics(request: NetStatTCPRequest) -> Network
         )
 
 @mcp.tool()
-async def get_network_netstat_udp_metrics(request: NetStatUDPRequest) -> NetworkMetricsResponse:
+async def get_network_netstat_udp_stats(request: NetStatUDPRequest) -> NetworkMetricsResponse:
     """
     Get network netstat UDP metrics and error statistics.
     

@@ -728,10 +728,9 @@ class utilityELT:
     # ============================================================================
     # GENERIC VALUE + UNIT FORMATTERS (REUSABLE ACROSS METRICS)
     # ============================================================================
-    
     def format_value_with_unit(self, value: float, unit: str) -> str:
         """Format a numeric value with a unit into a readable string.
-        Supports common units like count, bytes, bits_per_second, bytes_per_second, percent, iops.
+        Supports common units like count, bytes, bits_per_second, bytes_per_second, percent, iops, packets_per_second.
         """
         try:
             unit_lower = (unit or '').strip().lower()
@@ -756,6 +755,8 @@ class utilityELT:
                 return self.format_percentage(value)
             elif unit_lower in ['iops', 'ops', 'ops_per_second']:
                 return self.format_operations_per_second(value)
+            elif unit_lower in ['packets_per_second', 'pps', 'packets/s']:  # NEW LINE
+                return self.format_packets_per_second(value)                # NEW LINE
             elif unit_lower in ['seconds', 'sec', 's']:
                 return self.format_duration_seconds(value)
             else:
@@ -778,3 +779,20 @@ class utilityELT:
         numeric = self.extract_numeric_value(readable)
         unit_suffix = '' if unit in ['count', '', None] else f" {unit}"
         return self.highlight_critical_values(numeric, thresholds or {}, unit_suffix, is_top)
+
+    def format_packets_per_second(self, packets_per_sec: float) -> str:
+        """Format packets per second to readable units"""
+        try:
+            packets_per_sec = float(packets_per_sec)
+            if packets_per_sec == 0:
+                return "0 pps"
+            elif packets_per_sec < 1:
+                return f"{packets_per_sec:.3f} pps"
+            elif packets_per_sec < 1000:
+                return f"{packets_per_sec:.1f} pps"
+            elif packets_per_sec < 1000000:
+                return f"{packets_per_sec/1000:.1f}K pps"
+            else:
+                return f"{packets_per_sec/1000000:.2f}M pps"
+        except (ValueError, TypeError):
+            return str(packets_per_sec)        

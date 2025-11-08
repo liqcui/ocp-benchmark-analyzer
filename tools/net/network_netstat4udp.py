@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
+import re
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -32,13 +33,23 @@ class netStatUDPCollector:
     async def _ensure_prometheus_client(self) -> PrometheusBaseQuery:
         """Ensure Prometheus client is initialized"""
         if not self.prometheus_client:
-            prometheus_url = self.config.prometheus.url
-            prometheus_token = self.config.prometheus.token
+            prometheus_url = getattr(self.config.prometheus, 'url', None)
+            prometheus_token = getattr(self.config.prometheus, 'token', None)
             
-            if not prometheus_url and self.auth_client:
-                prometheus_url = await self.auth_client.get_prometheus_url()
-            if not prometheus_token and self.auth_client:
-                prometheus_token = self.auth_client.token
+            if self.auth_client:
+                # Prefer discovered attributes when config missing
+                if not prometheus_url:
+                    # Try direct attribute then config export
+                    prometheus_url = getattr(self.auth_client, 'prometheus_url', None)
+                    if not prometheus_url:
+                        prom_cfg = self.auth_client.get_prometheus_config() or {}
+                        prometheus_url = prom_cfg.get('url')
+                if not prometheus_token:
+                    # Prefer explicit prometheus_token; fallback to auth token or config export
+                    prometheus_token = getattr(self.auth_client, 'prometheus_token', None) or getattr(self.auth_client, 'token', None)
+                    if not prometheus_token:
+                        prom_cfg = self.auth_client.get_prometheus_config() or {}
+                        prometheus_token = prom_cfg.get('token')
             
             if not prometheus_url:
                 raise ValueError("Prometheus URL not configured")
@@ -56,7 +67,37 @@ class netStatUDPCollector:
     
     def _substitute_node_pattern(self, expr: str, node_pattern: str) -> str:
         """Replace $node_name placeholder with actual node pattern"""
+        # Use regex match for instance label to support multiple nodes and optional port
+        expr = expr.replace('instance="$node_name"', 'instance=~"$node_name"')
         return expr.replace('$node_name', node_pattern)
+    
+    def _build_node_regex(self, node_names: List[str]) -> str:
+        """Build a regex that matches any of the provided node names with optional :port"""
+        # Prefer full names; de-duplicate short/full pairs
+        preferred: List[str] = []
+        short_to_full: Dict[str, str] = {}
+        seen: set = set()
+        for name in node_names:
+            if not name:
+                continue
+            if '.' in name:
+                short_to_full[name.split('.')[0]] = name
+        for name in node_names:
+            if not name:
+                continue
+            short = name.split('.')[0]
+            preferred_name = short_to_full.get(short, name)
+            if preferred_name not in seen:
+                seen.add(preferred_name)
+                preferred.append(preferred_name)
+        # Escape dots without introducing backslashes that break PromQL string parsing.
+        # Use "[.]" for literal dot. Hyphens are safe and should not be escaped.
+        def _promql_safe(n: str) -> str:
+            return n.replace('.', '[.]')
+        parts = [f"{_promql_safe(n)}(:[0-9]+)?" for n in preferred]
+        if not parts:
+            return ".*"
+        return "(" + "|".join(parts) + ")"
     
     async def _query_metric_for_nodes(
         self, 
@@ -157,7 +198,7 @@ class netStatUDPCollector:
                 continue
             
             node_names = [n['name'] for n in nodes]
-            node_pattern = '|'.join(node_names)
+            node_pattern = self._build_node_regex(node_names)
             
             node_values = await self._query_metric_for_nodes(
                 'udp_error_rx_in_errors',
@@ -200,7 +241,7 @@ class netStatUDPCollector:
                 continue
             
             node_names = [n['name'] for n in nodes]
-            node_pattern = '|'.join(node_names)
+            node_pattern = self._build_node_regex(node_names)
             
             node_values = await self._query_metric_for_nodes(
                 'udp_error_no_listen',
@@ -243,7 +284,7 @@ class netStatUDPCollector:
                 continue
             
             node_names = [n['name'] for n in nodes]
-            node_pattern = '|'.join(node_names)
+            node_pattern = self._build_node_regex(node_names)
             
             node_values = await self._query_metric_for_nodes(
                 'udp_error_lite_rx_in_errors',
@@ -286,7 +327,7 @@ class netStatUDPCollector:
                 continue
             
             node_names = [n['name'] for n in nodes]
-            node_pattern = '|'.join(node_names)
+            node_pattern = self._build_node_regex(node_names)
             
             node_values = await self._query_metric_for_nodes(
                 'udp_error_rx_in_buffer_errors',
@@ -329,7 +370,7 @@ class netStatUDPCollector:
                 continue
             
             node_names = [n['name'] for n in nodes]
-            node_pattern = '|'.join(node_names)
+            node_pattern = self._build_node_regex(node_names)
             
             node_values = await self._query_metric_for_nodes(
                 'udp_error_tx_buffer_errors',
@@ -372,7 +413,7 @@ class netStatUDPCollector:
                 continue
             
             node_names = [n['name'] for n in nodes]
-            node_pattern = '|'.join(node_names)
+            node_pattern = self._build_node_regex(node_names)
             
             node_values = await self._query_metric_for_nodes(
                 'nestat_udp_in',
@@ -415,7 +456,7 @@ class netStatUDPCollector:
                 continue
             
             node_names = [n['name'] for n in nodes]
-            node_pattern = '|'.join(node_names)
+            node_pattern = self._build_node_regex(node_names)
             
             node_values = await self._query_metric_for_nodes(
                 'netstat_udp_out',
@@ -440,46 +481,53 @@ class netStatUDPCollector:
     
     async def collect_all_metrics(self) -> Dict[str, Any]:
         """Collect all UDP netstat metrics"""
-        # Get node groups
         prom_client = await self._ensure_prometheus_client()
-        node_groups = await self.utility.get_node_groups(prom_client)
-        
-        # Collect all metrics
-        metrics_results = []
-        
-        # Get all network_netstat_udp metrics from config
-        udp_metrics = self._get_metrics_config()
-        
-        for metric_config in udp_metrics:
-            metric_name = metric_config.get('name', '')
+        try:
+            # Get node groups
+            node_groups = await self.utility.get_node_groups(prom_client)
             
-            if metric_name == 'udp_error_rx_in_errors':
-                result = await self.collect_udp_error_rx_in_errors(node_groups)
-            elif metric_name == 'udp_error_no_listen':
-                result = await self.collect_udp_error_no_listen(node_groups)
-            elif metric_name == 'udp_error_lite_rx_in_errors':
-                result = await self.collect_udp_error_lite_rx_in_errors(node_groups)
-            elif metric_name == 'udp_error_rx_in_buffer_errors':
-                result = await self.collect_udp_error_rx_in_buffer_errors(node_groups)
-            elif metric_name == 'udp_error_tx_buffer_errors':
-                result = await self.collect_udp_error_tx_buffer_errors(node_groups)
-            elif metric_name == 'nestat_udp_in':
-                result = await self.collect_nestat_udp_in(node_groups)
-            elif metric_name == 'netstat_udp_out':
-                result = await self.collect_netstat_udp_out(node_groups)
-            else:
-                continue
+            # Collect all metrics
+            metrics_results = []
             
-            if result:
-                metrics_results.append(result)
-        
-        # Build final result
-        return {
-            'category': 'network_netstat_udp',
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'timezone': 'UTC',
-            'metrics': metrics_results
-        }
+            # Get all network_netstat_udp metrics from config
+            udp_metrics = self._get_metrics_config()
+            
+            for metric_config in udp_metrics:
+                metric_name = metric_config.get('name', '')
+                
+                if metric_name == 'udp_error_rx_in_errors':
+                    result = await self.collect_udp_error_rx_in_errors(node_groups)
+                elif metric_name == 'udp_error_no_listen':
+                    result = await self.collect_udp_error_no_listen(node_groups)
+                elif metric_name == 'udp_error_lite_rx_in_errors':
+                    result = await self.collect_udp_error_lite_rx_in_errors(node_groups)
+                elif metric_name == 'udp_error_rx_in_buffer_errors':
+                    result = await self.collect_udp_error_rx_in_buffer_errors(node_groups)
+                elif metric_name == 'udp_error_tx_buffer_errors':
+                    result = await self.collect_udp_error_tx_buffer_errors(node_groups)
+                elif metric_name == 'nestat_udp_in':
+                    result = await self.collect_nestat_udp_in(node_groups)
+                elif metric_name == 'netstat_udp_out':
+                    result = await self.collect_netstat_udp_out(node_groups)
+                else:
+                    continue
+                
+                if result:
+                    metrics_results.append(result)
+            
+            # Build final result
+            return {
+                'category': 'network_netstat_udp',
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'timezone': 'UTC',
+                'metrics': metrics_results
+            }
+        finally:
+            # Ensure Prometheus session is closed to prevent resource warnings
+            try:
+                await prom_client.close()
+            except Exception:
+                pass
     
     async def close(self):
         """Close resources"""

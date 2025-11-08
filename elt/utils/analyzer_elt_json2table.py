@@ -102,15 +102,7 @@ class GenericELT(utilityELT):
         except ImportError as e:
             logger.warning(f"Could not import cluster_info handler: {e}")
         
-        # Add more handlers as needed - easy to extend
-        # Example for new metric:
-        # try:
-        #     from .metrics.analyzer_elt_disk_io import diskIOELT
-        #     register_metric_handler('disk_io', diskIOELT, self._is_disk_io)
-        # except ImportError:
-        #     pass
-
-        # Add to _ensure_handlers_registered method after cluster_info registration
+        # Register network_l1 handler
         try:
             from ..net.analyzer_elt_network_l1 import networkL1ELT
             register_metric_handler(
@@ -131,9 +123,75 @@ class GenericELT(utilityELT):
             )
         except ImportError as e:
             logger.warning(f"Could not import network_socket_tcp handler: {e}")
-            
+        
+        # Register network_socket_udp handler
+        try:
+            from ..net.analyzer_elt_network_socket4udp import networkSocketUDPELT
+            register_metric_handler(
+                'network_socket_udp',
+                networkSocketUDPELT,
+                self._is_network_socket_udp
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import network_socket_udp handler: {e}")
+        
+        # Register network_socket_ip handler
+        try:
+            from ..net.analyzer_elt_network_socket4ip import networkSocketIPELT
+            register_metric_handler(
+                'network_socket_ip',
+                networkSocketIPELT,
+                self._is_network_socket_ip
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import network_socket_ip handler: {e}")
+        
+        # Register network_socket_mem handler - NEW
+        try:
+            from ..net.analyzer_elt_network_socket4mem import networkSocketMemELT
+            register_metric_handler(
+                'network_socket_mem',
+                networkSocketMemELT,
+                self._is_network_socket_mem
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import network_socket_mem handler: {e}")
+        
         self.registry._initialized = True
-    
+
+        try:
+            from ..net.analyzer_elt_network_socket4softnet import networkSocketSoftnetELT
+            register_metric_handler(
+                'network_socket_softnet',
+                networkSocketSoftnetELT,
+                self._is_network_socket_softnet
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import network_socket_softnet handler: {e}")
+
+        try:
+            from ..net.analyzer_elt_network_netstat4tcp import networkNetstatTCPELT
+            register_metric_handler(
+                'network_netstat_tcp',
+                networkNetstatTCPELT,
+                self._is_network_netstat_tcp
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import network_netstat_tcp handler: {e}")
+
+        # Register network_netstat_udp handler
+        try:
+            from ..net.analyzer_elt_network_netstat4udp import networkNetstatUDPELT
+            register_metric_handler(
+                'network_netstat_udp',
+                networkNetstatUDPELT,
+                self._is_network_netstat_udp
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import network_netstat_udp handler: {e}")
+        
+        self.registry._initialized = True
+
     # ============================================================================
     # DATA TYPE IDENTIFICATION
     # ============================================================================
@@ -204,6 +262,64 @@ class GenericELT(utilityELT):
             return True
         return False
 
+    @staticmethod
+    def _is_network_socket_ip(data: Dict[str, Any]) -> bool:
+        """Identify network socket IP data"""
+        if 'category' in data and data.get('category') in ['network_netstat_ip', 'network_socket_ip']:
+            return True
+        if 'metrics' in data and isinstance(data.get('metrics'), dict):
+            metric_keys = data['metrics'].keys()
+            if any('netstat_ip' in k or 'Icmp' in k for k in metric_keys):
+                return True
+        return False
+
+    @staticmethod
+    def _is_network_socket_mem(data: Dict[str, Any]) -> bool:
+        """Identify network socket memory data - NEW"""
+        if 'category' in data and data.get('category') == 'network_socket_mem':
+            return True
+        if 'metrics' in data and isinstance(data.get('metrics'), list):
+            for metric in data['metrics']:
+                if isinstance(metric, dict):
+                    metric_name = metric.get('metric', '')
+                    if any(keyword in metric_name for keyword in ['sockstat', 'TCP_Kernel', 'UDP_Kernel', 'FRAG_memory']):
+                        return True
+        return False
+
+    @staticmethod
+    def _is_network_socket_softnet(data: Dict[str, Any]) -> bool:
+        """Identify network socket softnet data"""
+        if 'category' in data and data.get('category') == 'network_socket_softnet':
+            return True
+        if 'metrics' in data and isinstance(data.get('metrics'), dict):
+            metric_keys = data['metrics'].keys()
+            if any('softnet' in k for k in metric_keys):
+                return True
+        return False
+
+    @staticmethod
+    def _is_network_netstat_tcp(data: Dict[str, Any]) -> bool:
+        """Identify network TCP netstat data"""
+        if 'category' in data and data.get('category') == 'network_netstat_tcp':
+            return True
+        if 'metrics' in data and isinstance(data.get('metrics'), dict):
+            metric_keys = data['metrics'].keys()
+            if any('netstat_tcp' in k or 'node_netstat_Tcp' in k or 'node_tcp_sync' in k for k in metric_keys):
+                return True
+        return False
+
+    @staticmethod
+    def _is_network_netstat_udp(data: Dict[str, Any]) -> bool:
+        """Identify network UDP netstat data - NEW"""
+        if 'category' in data and data.get('category') == 'network_netstat_udp':
+            return True
+        if 'metrics' in data and isinstance(data.get('metrics'), list):
+            for metric in data['metrics']:
+                if isinstance(metric, dict):
+                    metric_name = metric.get('metric', '')
+                    if any(keyword in metric_name for keyword in ['udp_error', 'nestat_udp', 'netstat_udp']):
+                        return True
+        return False
     # ============================================================================
     # MAIN PROCESSING PIPELINE
     # ============================================================================
@@ -257,6 +373,24 @@ class GenericELT(utilityELT):
             elif data_type == 'network_socket_tcp':
                 structured_data = handler.extract_network_socket_tcp(actual_data) if hasattr(handler, 'extract_network_socket_tcp') else {}
                 summary_method = 'summarize_network_socket_tcp'
+            elif data_type == 'network_socket_udp':
+                structured_data = handler.extract_network_socket_udp(actual_data) if hasattr(handler, 'extract_network_socket_udp') else {}
+                summary_method = 'summarize_network_socket_udp'
+            elif data_type == 'network_socket_ip':
+                structured_data = handler.extract_network_socket_ip(actual_data) if hasattr(handler, 'extract_network_socket_ip') else {}
+                summary_method = 'summarize_network_socket_ip'
+            elif data_type == 'network_socket_mem':
+                structured_data = handler.extract_network_socket_mem(actual_data) if hasattr(handler, 'extract_network_socket_mem') else {}
+                summary_method = 'summarize_network_socket_mem'
+            elif data_type == 'network_socket_softnet':
+                structured_data = handler.extract_network_socket_softnet(actual_data) if hasattr(handler, 'extract_network_socket_softnet') else {}
+                summary_method = 'summarize_network_socket_softnet'
+            elif data_type == 'network_netstat_tcp':
+                structured_data = handler.extract_network_netstat_tcp(actual_data) if hasattr(handler, 'extract_network_netstat_tcp') else {}
+                summary_method = 'summarize_network_netstat_tcp'
+            elif data_type == 'network_netstat_udp':  # NEW
+                structured_data = handler.extract_network_netstat_udp(actual_data) if hasattr(handler, 'extract_network_netstat_udp') else {}
+                summary_method = 'summarize_network_netstat_udp'
             else:
                 # Generic fallback
                 structured_data = handler.extract_cluster_info(actual_data) if hasattr(handler, 'extract_cluster_info') else {}
@@ -296,10 +430,8 @@ class GenericELT(utilityELT):
         
         # Unwrap typical wrappers for network_l1 as well
         if data_type == 'network_l1':
-            # Many tool responses wrap actual payload under top-level 'data'
             if 'data' in data and isinstance(data.get('data'), dict):
                 return data['data']
-            # Some responses may nest under 'result' → 'data'
             if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
                 return data['result']['data']
 
@@ -310,8 +442,50 @@ class GenericELT(utilityELT):
             if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
                 return data['result']['data']
         
+        # Unwrap for network_socket_udp
+        if data_type == 'network_socket_udp':
+            if 'data' in data and isinstance(data.get('data'), dict):
+                return data['data']
+            if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
+                return data['result']['data']
+        
+        # Unwrap for network_socket_ip
+        if data_type == 'network_socket_ip':
+            if 'data' in data and isinstance(data.get('data'), dict):
+                return data['data']
+            if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
+                return data['result']['data']
+        
+        # Unwrap for network_socket_mem
+        if data_type == 'network_socket_mem':
+            if 'data' in data and isinstance(data.get('data'), dict):
+                return data['data']
+            if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
+                return data['result']['data']
+        
+        # Unwrap for network_socket_softnet
+        if data_type == 'network_socket_softnet':
+            if 'data' in data and isinstance(data.get('data'), dict):
+                return data['data']
+            if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
+                return data['result']['data']
+
+        # Unwrap for network_netstat_tcp
+        if data_type == 'network_netstat_tcp':
+            if 'data' in data and isinstance(data.get('data'), dict):
+                return data['data']
+            if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
+                return data['result']['data']
+        
+        # Unwrap for network_netstat_udp - NEW
+        if data_type == 'network_netstat_udp':
+            if 'data' in data and isinstance(data.get('data'), dict):
+                return data['data']
+            if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
+                return data['result']['data']
+        
         return data
-    
+
     def _process_generic(self, data: Dict[str, Any], data_type: str) -> Dict[str, Any]:
         """Generic processing for unknown data types"""
         try:

@@ -32,6 +32,45 @@ class socketStatIPCollector:
         if not self.metrics_config:
             # Fallback to network_socket_ip if needed
             self.metrics_config = config.get_metrics_by_category('network_socket_ip')
+        # All metrics by category for fuzzy fallback lookups
+        self._all_metrics_by_category = self.config.get_all_metrics() if hasattr(self.config, 'get_all_metrics') else {}
+
+    def _normalize(self, s: str) -> str:
+        """Normalize a metric name for fuzzy comparison"""
+        try:
+            import re
+            return re.sub(r'[^a-z0-9]+', '', s.lower())
+        except Exception:
+            return s.lower()
+
+    def _find_metric_info(self, preferred_names: List[str]) -> Optional[Dict[str, Any]]:
+        """
+        Resolve metric configuration by trying:
+        1) Exact match in current category list
+        2) Exact match across all categories
+        3) Fuzzy match (normalized substring) across all categories
+        """
+        if not isinstance(preferred_names, list):
+            preferred_names = [preferred_names]
+        # Try exact in current category
+        for name in preferred_names:
+            for m in self.metrics_config:
+                if m.get('name') == name:
+                    return m
+        # Try exact across all categories
+        for name in preferred_names:
+            for cat_metrics in self._all_metrics_by_category.values():
+                for m in cat_metrics:
+                    if m.get('name') == name:
+                        return m
+        # Fuzzy match
+        normalized_targets = [self._normalize(n) for n in preferred_names]
+        for cat_metrics in self._all_metrics_by_category.values():
+            for m in cat_metrics:
+                nm = self._normalize(str(m.get('name', '')))
+                if any(t in nm for t in normalized_targets):
+                    return m
+        return None
         
     async def __aenter__(self):
         await self.prometheus_client._ensure_session()
@@ -52,14 +91,42 @@ class socketStatIPCollector:
     def _format_node_results(self, metric_data: Dict[str, Any], node_groups: Dict[str, List[Dict]], 
                             metric_name: str, unit: str, top_n: int = 3) -> Dict[str, Any]:
         """Format results by node groups with top N for workers"""
+        # Build role buckets, prefilling with zero rows when data absent
+        roles_template = {role: [] for role in ['controlplane', 'worker', 'infra', 'workload']}
         if 'result' not in metric_data or not metric_data['result']:
-            return {"error": "No data available"}
+            result_zero = {}
+            for role in roles_template.keys():
+                nodes = node_groups.get(role, [])
+                if nodes:
+                    role_rows = []
+                    for node_info in nodes:
+                        node_name = node_info.get('name') or ''
+                        role_rows.append({
+                            "node": node_name,
+                            "avg": 0.0,
+                            "max": 0.0,
+                            "unit": unit
+                        })
+                    # Apply top N for workers only
+                    if role == 'worker' and len(role_rows) > top_n:
+                        role_rows = role_rows[:top_n]
+                    result_zero[role] = role_rows
+                else:
+                    result_zero[role] = []
+            return result_zero
         
         # Parse all results
         node_values: Dict[str, List[float]] = {}
         for item in metric_data['result']:
-            instance = item.get('metric', {}).get('instance', '')
-            node_name = instance.split(':')[0] if ':' in instance else instance
+            labels = item.get('metric', {}) or {}
+            instance = labels.get('instance', '')
+            node = labels.get('node', '')
+            nodename = labels.get('nodename', '')
+            node_name = ''
+            if instance:
+                node_name = instance.split(':')[0]
+            if not node_name:
+                node_name = node or nodename
             
             values = []
             for ts, val in item.get('values', []):
@@ -76,20 +143,40 @@ class socketStatIPCollector:
                 node_values[node_name].extend(values)
         
         # Organize by node groups
-        result = {}
+        result = {role: [] for role in ['controlplane', 'worker', 'infra', 'workload']}
         for role in ['controlplane', 'worker', 'infra', 'workload']:
             nodes = node_groups.get(role, [])
             if not nodes:
+                # Keep empty list for roles with no nodes
                 continue
                 
             role_data = []
+            seen_nodes = set()
             for node_info in nodes:
                 node_name = node_info['name']
                 short_name = node_name.split('.')[0]
                 
-                # Try both full and short names
-                values = node_values.get(node_name) or node_values.get(short_name)
+                # Build candidate variants (full, short, lowercased)
+                variants = [node_name, short_name, node_name.lower(), short_name.lower()]
+                # Try direct matches first
+                values = None
+                for v in variants:
+                    if v in node_values:
+                        values = node_values[v]
+                        break
+                # Fallback: partial/fuzzy match
+                if not values:
+                    for nv_key in node_values.keys():
+                        try:
+                            if any(v and (v in nv_key or nv_key in v) for v in variants):
+                                values = node_values[nv_key]
+                                break
+                        except Exception:
+                            continue
                 if values:
+                    if node_name in seen_nodes:
+                        continue
+                    seen_nodes.add(node_name)
                     stats = self._calculate_statistics(values)
                     role_data.append({
                         "node": node_name,
@@ -106,13 +193,34 @@ class socketStatIPCollector:
                 result[role] = role_data[:top_n]
             else:
                 result[role] = role_data
+            
+            # If still no rows for this role, prefill zeros for visibility
+            if not result[role] and nodes:
+                prefill = []
+                for node_info in nodes:
+                    node_name = node_info.get('name') or ''
+                    prefill.append({
+                        "node": node_name,
+                        "avg": 0.0,
+                        "max": 0.0,
+                        "unit": unit
+                    })
+                if role == 'worker' and len(prefill) > top_n:
+                    prefill = prefill[:top_n]
+                result[role] = prefill
         
         return result
     
     async def collect_netstat_ip_in_octets(self, start: str, end: str, 
                                           step: str = "15s") -> Dict[str, Any]:
         """Collect IP incoming octets per second"""
-        metric_info = next((m for m in self.metrics_config if m['name'] == 'netstat_ip_in_octets'), None)
+        # Try common aliases used in different configs
+        metric_info = self._find_metric_info([
+            'netstat_ip_in_octets',
+            'node_netstat_Ip_InOctets',
+            'node_netstat_IpExt_InOctets',
+            'node_netstat_IpExt_InOctets_rate'
+        ])
         if not metric_info:
             return {"error": "Metric configuration not found"}
         
@@ -134,7 +242,12 @@ class socketStatIPCollector:
     async def collect_netstat_ip_out_octets(self, start: str, end: str, 
                                            step: str = "15s") -> Dict[str, Any]:
         """Collect IP outgoing octets per second"""
-        metric_info = next((m for m in self.metrics_config if m['name'] == 'netstat_ip_out_octets'), None)
+        metric_info = self._find_metric_info([
+            'netstat_ip_out_octets',
+            'node_netstat_Ip_OutOctets',
+            'node_netstat_IpExt_OutOctets',
+            'node_netstat_IpExt_OutOctets_rate'
+        ])
         if not metric_info:
             return {"error": "Metric configuration not found"}
         

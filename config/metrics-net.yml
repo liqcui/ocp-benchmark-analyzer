@@ -2,35 +2,35 @@ metrics:
 #Network Layer 1
   - name: network_l1_node_network_up
     title: "network_l1_node_network_up"
-    expr: 'node_network_up{instance="$node_name",job="node-exporter"}'
+    expr: 'node_network_up{instance=~"$node_name",job="node-exporter"}'
     unit: count
     description: "Network Operational Status: YES or NO"
     category: network_l1
 
   - name: network_l1_node_traffic_carrier
     title: "network_l1_node_traffic_carrier"
-    expr: 'node_network_carrier{instance="$node_name",job="node-exporter"}'
+    expr: 'node_network_carrier{instance=~"$node_name",job="node-exporter"}'
     unit: count
     description: "Network Operational Status: YES or NO"
     category: network_l1
 
   - name: network_l1_node_network_speed_bytes
     title: "network_l1_node_network_speed_bytes"
-    expr: 'node_network_speed_bytes{instance="$node_name",job="node-exporter"} * 8'
+    expr: 'node_network_speed_bytes{instance=~"$node_name",job="node-exporter"} * 8'
     unit: bits_per_second
     description: "Network speed bytes: Max"
     category: network_l1
 
   - name: network_l1_node_network_mtu_bytes
     title: "network_l1_node_network_mtu_bytes"
-    expr: 'node_network_mtu_bytes{instance="$node_name",job="node-exporter"}'
+    expr: 'node_network_mtu_bytes{instance=~"$node_name",job="node-exporter"}'
     unit: bytes
     description: "Network MTU bytes: Max"
     category: network_l1
 
   - name: network_l1_node_arp_entries
     title: "network_l1_node_arp_entries"
-    expr: 'node_arp_entries{instance="$node_name",job="node-exporter"}'
+    expr: 'node_arp_entries{instance=~"$node_name",job="node-exporter"}'
     unit: count
     description: "ARP entries: avg, max"
     category: network_l1
@@ -38,49 +38,49 @@ metrics:
 #Network Socketstat TCP
   - name: socket_tcp_allocated
     title: "socket_tcp_allocated"
-    expr: 'node_sockstat_TCP_alloc{instance="$node_name",job="node-exporter"}'
+    expr: 'node_sockstat_TCP_alloc{instance=~"$node_name",job="node-exporter"}'
     unit: count
     description: "Socket TCP allocated"
     category: network_socket_tcp
 
   - name: socket_tcp_inuse
     title: "socket_tcp_inuse"
-    expr: 'node_sockstat_TCP_inuse{instance="$node_name",job="node-exporter"}'
+    expr: 'node_sockstat_TCP_inuse{instance=~"$node_name",job="node-exporter"}'
     unit: count
     description: "Socket TCP inuse"
     category: network_socket_tcp
   
   - name: socket_tcp_orphan
     title: "socket_tcp_orphan"
-    expr: 'node_sockstat_TCP_orphan{instance="$node_name",job="node-exporter"}'
+    expr: 'node_sockstat_TCP_orphan{instance=~"$node_name",job="node-exporter"}'
     unit: count
     description: "Socket TCP orphan"
     category: network_socket_tcp
   
   - name: socket_tcp_tw
     title: "socket_tcp_tw"
-    expr: 'node_sockstat_TCP_tw{instance="$node_name",job="node-exporter"}'
+    expr: 'node_sockstat_TCP_tw{instance=~"$node_name",job="node-exporter"}'
     unit: count
     description: "Socket TCP tw"
     category: network_socket_tcp
 
   - name: socket_used
     title: "socket_used"
-    expr: 'node_sockstat_sockets_used{instance="$node_name",job="node-exporter"}'
+    expr: 'node_sockstat_sockets_used{instance=~"$node_name",job="node-exporter"}'
     unit: count
     description: "Socket used"
     category: network_socket_tcp
   
   - name: node_sockstat_FRAG_inuse
     title: "node_sockstat_FRAG_inuse"
-    expr: 'node_sockstat_FRAG_inuse{instance="$node_name",job="node-exporter"}'
+    expr: 'node_sockstat_FRAG_inuse{instance=~"$node_name",job="node-exporter"}'
     unit: count
     description: "Socket FRAG inuse"
     category: network_socket_tcp
   
   - name: node_sockstat_RAW_inuse
     title: "node_sockstat_RAW_inuse"
-    expr: 'node_sockstat_RAW_inuse{instance="$node_name",job="node-exporter"}'
+    expr: 'node_sockstat_RAW_inuse{instance=~"$node_name",job="node-exporter"}'
     unit: count
     description: "Socket RAW inuse"
     category: network_socket_tcp
@@ -88,14 +88,14 @@ metrics:
 #Network Socketstat UDP
   - name: socket_udp_inuse
     title: "socket_udp_inuse"
-    expr: 'node_sockstat_UDP_inuse{instance="$node_name",job="node-exporter"}'
+    expr: 'node_sockstat_UDP_inuse{instance=~"$node_name",job="node-exporter"}'
     unit: count
     description: "Socket UDP inuse"
     category: network_socket_udp
   
   - name: socket_udp_lite_inuse
     title: "socket_udp_lite_inuse"
-    expr: 'node_sockstat_UDPLITE_inuse{instance="$node_name",job="node-exporter"}'
+    expr: 'node_sockstat_UDPLITE_inuse{instance=~"$node_name",job="node-exporter"}'
     unit: count
     description: "Socket UDP lite inuse"
     category: network_socket_udp
@@ -103,35 +103,35 @@ metrics:
 #Network Socketstat Mem  
   - name: node_sockstat_FRAG_memory
     title: "node_sockstat_FRAG_memory"
-    expr: 'node_sockstat_FRAG_memory{instance="$node_name",job="node-exporter"}'
+    expr: 'node_sockstat_FRAG_memory{instance=~"$node_name",job="node-exporter"}'
     unit: count
     description: "Socket FRAG memory"
     category: network_socket_mem
 
   - name: TCP_Kernel_Buffer_Memory_Pages
     title: "TCP_Kernel_Buffer_Memory_Pages"
-    expr: 'node_sockstat_TCP_mem{instance="$node_name",job="node-exporter"}'
+    expr: 'node_sockstat_TCP_mem{instance=~"$node_name",job="node-exporter"}'
     unit: count
     description: "TCP Kernel Buffer Memory Pages"
     category: network_socket_mem
 
   - name: UDP_Kernel_Buffer_Memory_Pages
     title: "UDP_Kernel_Buffer_Memory_Pages"
-    expr: 'node_sockstat_UDP_mem{instance="$node_name",job="node-exporter"}'
+    expr: 'node_sockstat_UDP_mem{instance=~"$node_name",job="node-exporter"}'
     unit: count
     description: "UDP Kernel Buffer Memory Pages"
     category: network_socket_mem
 
   - name: node_sockstat_TCP_mem_bytes
     title: "node_sockstat_TCP_mem_bytes"
-    expr: 'node_sockstat_TCP_mem_bytes{instance="$node_name",job="node-exporter"}'
+    expr: 'node_sockstat_TCP_mem_bytes{instance=~"$node_name",job="node-exporter"}'
     unit: bytes
     description: "TCP Kernel Buffer Memory Bytes"
     category: network_socket_mem
 
   - name: node_sockstat_UDP_mem_bytes
     title: "node_sockstat_UDP_mem_bytes"
-    expr: 'node_sockstat_UDP_mem_bytes{instance="$node_name",job="node-exporter"}'
+    expr: 'node_sockstat_UDP_mem_bytes{instance=~"$node_name",job="node-exporter"}'
     unit: bytes
     description: "UDP Kernel Buffer Memory Bytes"
     category: network_socket_mem
@@ -139,35 +139,35 @@ metrics:
 #Network Socketstat SoftNet
   - name: node_softnet_packages_processed_total
     title: "node_softnet_packages_processed_total"
-    expr: 'irate(node_softnet_processed_total{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_softnet_processed_total{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "Softnet processed total"
     category: network_socket_softnet
 
   - name: node_softnet_packages_dropped_total
     title: "node_softnet_packages_dropped_total"
-    expr: 'irate(node_softnet_dropped_total{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_softnet_dropped_total{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "Softnet processed dropped total"
     category: network_socket_softnet
  
   - name: softnet_out_of_quota
     title: "softnet_out_of_quota"
-    expr: 'irate(node_softnet_times_squeezed_total{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_softnet_times_squeezed_total{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: eps
     description: "Softnet out of quota"
     category: network_socket_softnet
 
   - name: softnet_cpu_rps
     title: "softnet_cpu_rps"
-    expr: 'irate(node_softnet_received_rps_total{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_softnet_received_rps_total{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "Softnet CPU RPS"
     category: network_socket_softnet
 
   - name: softnet_flow_limit_count
     title: "softnet_flow_limit_count"
-    expr: 'irate(node_softnet_flow_limit_count_total{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_softnet_flow_limit_count_total{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: count_per_second
     description: "Softnet flow limit count"
     category: network_socket_softnet
@@ -175,35 +175,35 @@ metrics:
  #Network Socketstat IP 
   - name: netstat_ip_in_octets
     title: "netstat_ip_in_octets"
-    expr: 'irate(node_netstat_IpExt_InOctets{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_IpExt_InOctets{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: bytes_per_second
     description: "Netstat IP in octets"
     category: network_socket_ip
 
   - name: netstat_ip_out_octets
     title: "netstat_ip_out_octets"
-    expr: 'irate(node_netstat_IpExt_OutOctets{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_IpExt_OutOctets{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: bytes_per_second
     description: "Netstat IP out octets"
     category: network_socket_ip
 
   - name: node_netstat_Icmp_InMsgs
     title: "node_netstat_Icmp_InMsgs"
-    expr: 'irate(node_netstat_Icmp_InMsgs{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_Icmp_InMsgs{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "ICMP in messages"
     category: network_netstat_ip
 
   - name: node_netstat_Icmp_OutMsgs
     title: "node_netstat_Icmp_OutMsgs"
-    expr: 'irate(node_netstat_Icmp_OutMsgs{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_Icmp_OutMsgs{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "ICMP out messages"
     category: network_netstat_ip
 
   - name: node_netstat_Icmp_InErrors
     title: "node_netstat_Icmp_InErrors"
-    expr: 'irate(node_netstat_Icmp_InErrors{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_Icmp_InErrors{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "ICMP in errors"
     category: network_netstat_ip
@@ -211,112 +211,112 @@ metrics:
 #Network Netstat TCP
   - name: netstat_tcp_in
     title: "netstat_tcp_in"
-    expr: 'irate(node_netstat_Tcp_InSegs{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_Tcp_InSegs{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "TCP in"
     category: network_netstat_tcp
 
   - name: netstat_tcp_out
     title: "netstat_tcp_in"
-    expr: 'irate(node_netstat_Tcp_OutSegs{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_Tcp_OutSegs{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "TCP out"
     category: network_netstat_tcp
 
   - name: netstat_tcp_error_listen_overflow
     title: "netstat_tcp_error_listen_overflow"
-    expr: 'irate(node_netstat_TcpExt_ListenOverflows{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_TcpExt_ListenOverflows{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "TCP error listen overflow"
     category: network_netstat_tcp
 
   - name: netstat_tcp_error_listen_drops
     title: "netstat_tcp_error_listen_drops"
-    expr: 'irate(node_netstat_TcpExt_LockDroppedIcmps{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_TcpExt_LockDroppedIcmps{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "TCP error listen drops"
     category: network_netstat_tcp
 
   - name: netstat_tcp_error_sync_retrans
     title: "netstat_tcp_error_sync_retrans"
-    expr: 'irate(node_netstat_TcpExt_TCPSynRetrans{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_TcpExt_TCPSynRetrans{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "TCP error sync retrans"
     category: network_netstat_tcp
 
   - name: netstat_tcp_error_segments_retrans
     title: "netstat_tcp_error_segments_retrans"
-    expr: 'irate(node_netstat_Tcp_RetransSegs{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_Tcp_RetransSegs{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "TCP error segments retrans"
     category: network_netstat_tcp
 
   - name: netstat_tcp_error_receive_in_errors
     title: "netstat_tcp_error_netstat_receive_in_errors"
-    expr: 'irate(node_netstat_Tcp_InErrs{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_Tcp_InErrs{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "TCP error netstat receive in errors"
     category: network_netstat_tcp
 
   - name: netstat_tcp_error_rst_sent_out_errors
     title: "tcp_error_netstat_rst_sent_out_errors"
-    expr: 'irate(node_netstat_Tcp_OutRsts{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_Tcp_OutRsts{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "TCP error netstat rst sent out errors"
     category: network_netstat_tcp
   
   - name: netstat_tcp_error_receive_quene_drop
     title: "netstat_tcp_error_receive_quene_drop"
-    expr: 'irate(node_netstat_TcpExt_TCPRcvQDrop{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_TcpExt_TCPRcvQDrop{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "TCP error receive quene drop"
     category: network_netstat_tcp
 
   - name: netstat_tcp_error_out_order_queue
     title: "netstat_tcp_error_out_order_queue"
-    expr: 'irate(node_netstat_TcpExt_TCPOFOQueue{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_TcpExt_TCPOFOQueue{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "TCP error out order queue"
     category: network_netstat_tcp
 
   - name: netstat_tcp_error_tcp_timeouts  
     title: "netstat_tcp_error_tcp_timeouts"
-    expr: 'irate(node_netstat_TcpExt_TCPTimeouts{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_TcpExt_TCPTimeouts{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "TCP error tcp timeouts"
     category: network_netstat_tcp
 
   - name: node_tcp_sync_cookie_failures
     title: "node_tcp_sync_cookie_failures"
-    expr: 'irate(node_netstat_TcpExt_SyncookiesFailed{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_TcpExt_SyncookiesFailed{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: eps
     description: "TCP sync cookie failures"
     category: network_netstat_tcp
 
   - name: node_tcp_sync_cookie_validated
     title: "node_tcp_sync_cookie_validated"
-    expr: 'irate(node_netstat_TcpExt_SyncookiesRecv{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_TcpExt_SyncookiesRecv{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: eps
     description: "TCP sync cookie validated"
     category: network_netstat_tcp
 
   - name: node_tcp_sync_cookie_sent
     title: "node_tcp_sync_cookie_sent"
-    expr: 'irate(node_netstat_TcpExt_SyncookiesSent{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_TcpExt_SyncookiesSent{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: eps
     description: "TCP sync cookie sent"
     category: network_netstat_tcp
   
   - name: node_netstat_Tcp_MaxConn
     title: "node_netstat_Tcp_MaxConn"
-    expr: 'irate(node_netstat_Tcp_MaxConn{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_Tcp_MaxConn{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: count
     description: "TCP max connections"
     category: network_netstat_tcp
     
   - name: node_netstat_Tcp_CurrEstab
     title: "node_netstat_Tcp_CurrEstab"
-    expr: 'irate(node_netstat_Tcp_CurrEstab{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_Tcp_CurrEstab{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: count
     description: "TCP current established"
     category: network_netstat_tcp
@@ -324,49 +324,49 @@ metrics:
 #Network Netstat UDP    
   - name: udp_error_rx_in_errors
     title: "udp_error_rx_in_errors"
-    expr: 'irate(node_netstat_Udp_InErrors{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_Udp_InErrors{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "UDP error rx in errors"
     category: network_netstat_udp
 
   - name: udp_error_no_listen
     title: "udp_error_no_listen"
-    expr: 'irate(node_netstat_Udp_NoPorts{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_Udp_NoPorts{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "UDP error no listen"
     category: network_netstat_udp
 
   - name: udp_error_lite_rx_in_errors
     title: "udp_error_lite_rx_in_errors"
-    expr: 'irate(node_netstat_UdpLite_InErrors{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_UdpLite_InErrors{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "UDP error lite rx in errors"
     category: network_netstat_udp
 
   - name: udp_error_rx_in_buffer_errors
     title: "udp_error_rx_in_buffer_errors"
-    expr: 'irate(node_netstat_Udp_RcvbufErrors{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_Udp_RcvbufErrors{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "UDP error rx in buffer errors"
     category: network_netstat_udp
 
   - name: udp_error_tx_buffer_errors
     title: "udp_error_tx_buffer_errors"
-    expr: 'irate(node_netstat_Udp_SndbufErrors{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_Udp_SndbufErrors{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "UDP error tx buffer errors"
     category: network_netstat_udp
 
   - name: nestat_udp_in
     title: "udp_in"
-    expr: 'irate(node_netstat_Udp_InDatagrams{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'irate(node_netstat_Udp_InDatagrams{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "UDP in"
     category: network_netstat_udp
 
   - name: netstat_udp_out
     title: "udp_out"
-    expr: 'irate(node_netstat_Udp_OutDatagrams{instance="$node_name",job="node-exporter"}[5m])' 
+    expr: 'irate(node_netstat_Udp_OutDatagrams{instance=~"$node_name",job="node-exporter"}[5m])' 
     unit: packets_per_second
     description: "UDP out"
     category: network_netstat_udp
@@ -430,91 +430,91 @@ metrics:
 
   - name: network_io_node_saturation_rx
     title: "network_io_node_saturation_rx"
-    expr: '(rate(node_network_receive_bytes_total{instance="$node_name",job="node-exporter"}[5m]) / ignoring(speed) node_network_speed_bytes{instance="$node_name",job="node-exporter", speed!="-1"}) * 100'
+    expr: '(rate(node_network_receive_bytes_total{instance="$node_name",job="node-exporter"}[5m]) / ignoring(speed) node_network_speed_bytes{instance=~"$node_name",job="node-exporter", speed!="-1"}) * 100'
     unit: count
     description: "Network saturation RX"
     category: network_io
 
   - name: network_io_node_saturation_tx
     title: "network_io_node_saturation_tx"
-    expr: '(rate(node_network_transmit_bytes_total{instance="$node_name",job="node-exporter"}[5m]) / ignoring(speed) node_network_speed_bytes{instance="$node_name",job="node-exporter", speed!="-1"}) * 100'
+    expr: '(rate(node_network_transmit_bytes_total{instance="$node_name",job="node-exporter"}[5m]) / ignoring(speed) node_network_speed_bytes{instance=~"$node_name",job="node-exporter", speed!="-1"}) * 100'
     unit: count
     description: "Network saturation TX"
     category: network_io
 
   - name: network_io_node_error_rx
     title: "node_network_traffic_error_rx"
-    expr: 'rate(node_network_receive_errs_total{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'rate(node_network_receive_errs_total{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "Network receive errors per second"
     category: network_io
 
   - name: network_io_node_error_tx
     title: "node_network_traffic_error_tx"
-    expr: 'rate(node_network_transmit_errs_total{instance="$node_name",job="node-exporter"}[5m])'
+    expr: 'rate(node_network_transmit_errs_total{instance=~"$node_name",job="node-exporter"}[5m])'
     unit: packets_per_second
     description: "Network transmit errors per second"
     category: network_io
     
   - name: network_io_node_speed_bytes
     title: "node_network_speed_bytes"
-    expr: 'node_network_speed_bytes{instance="$node_name",job="node-exporter"} * 8'
+    expr: 'node_network_speed_bytes{instance=~"$node_name",job="node-exporter"} * 8'
     unit: bits_per_second
     description: "Network speed bytes"
     category: network_io
   
   - name: network_io_nodec_receive_fifo_total
     title: "node_traffic_receive_fifo_total"
-    expr: 'node_network_receive_fifo_total{instance="$node_name",job="node-exporter"}'
+    expr: 'node_network_receive_fifo_total{instance=~"$node_name",job="node-exporter"}'
     unit: count
     description: "Receive fifo total"
     category: network_io
 
   - name: network_io_node_transit_fifo_total
     title: "node_traffic_transit_fifo_total"
-    expr: 'node_network_transmit_fifo_total{instance="$node_name",job="node-exporter"}'
+    expr: 'node_network_transmit_fifo_total{instance=~"$node_name",job="node-exporter"}'
     unit: count
     description: "Receive fio dropped"
     category: network_io
 
   - name: node_network_receive_compressed_total
     title: "node_network_receive_compressed_total"
-    expr: 'node_network_receive_compressed_total{instance="$node_name",job="node-exporter"}'
+    expr: 'node_network_receive_compressed_total{instance=~"$node_name",job="node-exporter"}'
     unit: packets_per_second
     description: "Receive compressed total"
     category: network_io
 
   - name: node_network_receive_multicast_total
     title: "node_network_receive_multicast_total"
-    expr: 'node_network_receive_multicast_total{instance="$node_name",job="node-exporter"}'
+    expr: 'node_network_receive_multicast_total{instance=~"$node_name",job="node-exporter"}'
     unit: packets_per_second
     description: "Receive multicast total"
     category: network_io
 
   - name: node_network_receive_nohandler_total  
     title: "node_network_receive_nohandler_total"
-    expr: 'node_network_receive_nohandler_total{instance="$node_name",job="node-exporter"}'
+    expr: 'node_network_receive_nohandler_total{instance=~"$node_name",job="node-exporter"}'
     unit: packets_per_second
     description: "Receive nohandler total"
     category: network_io
   
   - name: node_network_receive_frame_total
     title: "node_network_receive_frame_total"
-    expr: 'node_network_receive_frame_total{instance="$node_name",job="node-exporter"}'
+    expr: 'node_network_receive_frame_total{instance=~"$node_name",job="node-exporter"}'
     unit: packets_per_second
     description: "Receive frame total"
     category: network_io
 
   - name: node_network_transmit_colls_total
     title: "node_network_transmit_colls_total"
-    expr: 'node_network_transmit_colls_total{instance="$node_name",job="node-exporter"}'
+    expr: 'node_network_transmit_colls_total{instance=~"$node_name",job="node-exporter"}'
     unit: packets_per_second
     description: "Transmit colls total"
     category: network_io
 
   - name: node_network_transmit_carrier_total
     title: "node_network_transmit_carrier_total"
-    expr: 'node_network_transmit_carrier_total{instance="$node_name",job="node-exporter"}'
+    expr: 'node_network_transmit_carrier_total{instance=~"$node_name",job="node-exporter"}'
     unit: packets_per_second
     description: "Transmit carrier total"
     category: network_io

@@ -49,7 +49,7 @@ class socketStatSoftNetCollector:
         end: str, 
         step: str = '15s'
     ) -> Dict[str, List[float]]:
-        """Query metric and organize by node"""
+        """Query metric and organize by node (keyed by node identifier)"""
         metric_config = self._get_metric_config(metric_name)
         if not metric_config:
             logger.warning(f"Metric {metric_name} not found in config")
@@ -64,10 +64,14 @@ class socketStatSoftNetCollector:
             
             for item in result.get('result', []):
                 metric_labels = item.get('metric', {})
-                instance = metric_labels.get('instance', '')
-                node_name = instance.split(':')[0] if ':' in instance else instance
-                if '.' in node_name:
-                    node_name = node_name.split('.')[0]
+                # Extract node name from common labels, prefer instance, fallback to node/nodename
+                raw_name = (
+                    metric_labels.get('instance', '') or
+                    metric_labels.get('node', '') or
+                    metric_labels.get('nodename', '')
+                )
+                # Remove port if any
+                node_name = raw_name.split(':')[0] if ':' in raw_name else raw_name
                 
                 values = []
                 for ts, val in item.get('values', []):
@@ -93,7 +97,9 @@ class socketStatSoftNetCollector:
         """Calculate average and max from values"""
         if not values:
             return {'avg': 0.0, 'max': 0.0}
-        return {'avg': sum(values) / len(values), 'max': max(values)}
+        avg_val = round(sum(values) / len(values), 2)
+        max_val = round(max(values), 2)
+        return {'avg': avg_val, 'max': max_val}
     
     async def _collect_metric_for_nodes(
         self, metric_name: str, start: str, end: str, step: str = '15s'
@@ -112,19 +118,35 @@ class socketStatSoftNetCollector:
                 'nodes': {'controlplane': {}, 'worker': {}, 'infra': {}, 'workload': {}}
             }
         
-        node_labels = await self.utility.get_all_node_labels(self.prometheus_client)
-        role_data = {'controlplane': {}, 'worker': {}, 'infra': {}, 'workload': {}}
+        # Build node role map using utility.get_node_groups (same approach as TCP netstat)
+        node_groups = await self.utility.get_node_groups(self.prometheus_client)
+        node_role_map: Dict[str, str] = {}
+        for role, nodes in node_groups.items():
+            for node in nodes:
+                full_name = node.get('name', '')
+                if not full_name:
+                    continue
+                node_role_map[full_name] = role
+                # Also map short name (without domain) to the same role
+                if '.' in full_name:
+                    short_name = full_name.split('.')[0]
+                    node_role_map[short_name] = role
+        
+        role_data: Dict[str, Dict[str, Dict[str, float]]] = {
+            'controlplane': {}, 'worker': {}, 'infra': {}, 'workload': {}
+        }
         
         for node_name, values in node_data.items():
-            labels = node_labels.get(node_name, {})
-            if not labels:
-                for full_name, node_labels_dict in node_labels.items():
-                    if full_name.startswith(node_name):
-                        labels = node_labels_dict
-                        break
-            
-            role = self.utility.determine_node_role(node_name, labels)
+            # Map node to role using prepared map; default to worker if unknown
+            role = node_role_map.get(node_name)
+            if role is None and '.' in node_name:
+                # Try short/long mapping opposites
+                short = node_name.split('.')[0]
+                role = node_role_map.get(short)
+            if role is None:
+                role = 'worker'
             stats = self._calculate_stats(values)
+            # Keep node_name as-is (may be FQDN); keys will count correctly
             role_data[role][node_name] = stats
         
         if role_data['worker']:

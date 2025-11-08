@@ -73,8 +73,10 @@ class netStatTCPCollector:
         
         try:
             # Query Prometheus
+            # Replace Grafana-style variable with a wildcard so Prometheus accepts the query
+            query_expr = expr.replace('$node_name', '.*')
             result = await self.prometheus.query_range(
-                query=expr,
+                query=query_expr,
                 start=start_time.isoformat(),
                 end=end_time.isoformat(),
                 step='15s'
@@ -151,7 +153,13 @@ class netStatTCPCollector:
                 }
                 
                 # Determine node role
-                role = node_role_map.get(node_name, 'unknown')
+                role = node_role_map.get(node_name)
+                if role is None and '.' in node_name:
+                    short_name = node_name.split('.')[0]
+                    role = node_role_map.get(short_name)
+                if role is None:
+                    # Default to worker so data does not get dropped
+                    role = 'worker'
                 
                 if node_name not in node_data:
                     node_data[node_name] = {
