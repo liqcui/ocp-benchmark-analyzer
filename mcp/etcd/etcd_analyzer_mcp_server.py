@@ -78,6 +78,13 @@ class MCPBaseModel(BaseModel):
 class DurationInput(MCPBaseModel):
     duration: str = Field(default="1h", description="Time duration for metrics collection")
 
+class NetworkIORequest(MCPBaseModel):
+    duration: str = Field(default="5m", description="Time duration for metrics collection")
+    start_time: Optional[str] = Field(default=None, description="Start time in ISO format")
+    end_time: Optional[str] = Field(default=None, description="End time in ISO format")
+    include_metrics: Optional[List[str]] = Field(default=None, description="Filter specific metrics")
+    node_groups: Optional[List[str]] = Field(default=None, description="Filter by node groups")
+
 class ETCDClusterStatusResponse(MCPBaseModel):
     status: str
     data: Optional[Dict[str, Any]] = None
@@ -130,14 +137,6 @@ class ETCDBackendCommitResponse(MCPBaseModel):
     error: Optional[str] = None
     timestamp: str
     category: str = Field(default="disk_backend_commit")
-    duration: str
-
-class ETCDNetworkIOResponse(MCPBaseModel):
-    status: str
-    data: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-    timestamp: str
-    category: str = Field(default="network_io")
     duration: str
 
 class ETCDDiskIOResponse(MCPBaseModel):
