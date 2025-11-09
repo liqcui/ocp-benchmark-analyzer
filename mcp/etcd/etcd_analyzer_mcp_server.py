@@ -85,6 +85,14 @@ class NetworkIORequest(MCPBaseModel):
     include_metrics: Optional[List[str]] = Field(default=None, description="Filter specific metrics")
     node_groups: Optional[List[str]] = Field(default=None, description="Filter by node groups")
 
+class NetworkMetricsResponse(MCPBaseModel):
+    status: str
+    data: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+    timestamp: str
+    category: Optional[str] = None
+    duration: Optional[str] = None
+    
 class ETCDClusterStatusResponse(MCPBaseModel):
     status: str
     data: Optional[Dict[str, Any]] = None
