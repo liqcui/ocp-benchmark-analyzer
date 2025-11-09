@@ -748,94 +748,88 @@ async def get_etcd_disk_backend_commit(duration: str = "1h") -> ETCDBackendCommi
         )
 
 @mcp.tool()
-async def get_etcd_network_io(duration: str = "1h") -> ETCDNetworkIOResponse:
+async def get_network_io_node(request: NetworkIORequest) -> NetworkMetricsResponse:
     """
-    Get etcd network I/O performance and utilization metrics.
+    Get comprehensive cluster node level network I/O metrics and performance statistics.
     
-    Monitors comprehensive network performance metrics for etcd cluster operations:
-    - Container network metrics (receive/transmit bytes for etcd pods)
-    - Peer network metrics (peer-to-peer communication latency and throughput)
-    - Client gRPC network metrics (client communication bandwidth)
-    - Node network utilization (network interface utilization and packet rates)
-    - Network drops and errors (packet loss and network issues)
-    - gRPC stream metrics (active watch and lease streams)
-    - Snapshot transfer duration (cluster synchronization network performance)
+    Monitors network performance metrics including:
+    - RX/TX bandwidth utilization on ocp node level(bits per second)
+    - RX/TX packet rates  on ocp node level(packets per second)
+    - Packet drops and errors on ocp node level(indicating congestion or issues)
+    - Network saturation metrics  on ocp node level(percentage of capacity)
+    - Interface status on ocp node level(up/down, carrier detection)
+    - Network speed configuration on ocp node level
+    - Connection tracking (conntrack entries and limits) on ocp node level
+    - ARP table statistics on ocp node level
+    - FIFO queue depths on ocp node level
     
-    Network performance directly impacts etcd cluster stability, client response times, and peer synchronization.
-    High network latency or packet loss can cause cluster instability and performance degradation.
+    Metrics organized by node role with avg/max statistics.
+    Worker nodes show top 3 performers.
+    
+    USE CASES:
+    - Network bottleneck identification and saturation analysis
+    - Packet drop troubleshooting and congestion detection
+    - Connection tracking table utilization monitoring
+    - Network capacity planning for infrastructure upgrades
+    - API server network load analysis via gRPC streams
+    - Interface health and carrier status monitoring
+    - Network performance baseline establishment
     
     Args:
-        duration: Time range for metrics collection. Examples: '15m', '30m', '1h', '2h', '6h', '12h', '1d'
+        duration: Time range for metrics (e.g., '5m', '15m', '1h', '6h', '1d'). Default: '5m'
+        start_time: Optional start time in ISO format (YYYY-MM-DDTHH:MM:SSZ)
+        end_time: Optional end time in ISO format (YYYY-MM-DDTHH:MM:SSZ)
     
     Returns:
-        ETCDNetworkIOResponse: Network I/O performance metrics including container/peer/client network statistics, node utilization, error rates, and health assessment
+        NetworkMetricsResponse: Network I/O performance metrics grouped by node role
     """
+    global prometheus_client, auth_manager, config
+    duration = request.duration
     try:
-        global auth_manager, network_collector, config, PROJECT_ROOT
-        if not network_collector:
-            # Lazy initialize if startup initialization didn't complete
-            if auth_manager is None:
-                if config is None:
-                    config = Config()
-                auth_manager = OpenShiftAuth(config.kubeconfig_path if config else None)
-                try:
-                    await auth_manager.initialize()
-                except Exception:
-                    return ETCDNetworkIOResponse(
-                        status="error",
-                        error="Failed to initialize OpenShift auth for network I/O",
-                        timestamp=datetime.now(pytz.UTC).isoformat(),
-                        duration=duration
-                    )
-            try:
-                metrics_net_file = os.path.join(PROJECT_ROOT, 'config', 'metrics-net.yml')
-                network_config = Config(metrics_file=metrics_net_file)
-                network_collector = NetworkIOCollector(
-                    prometheus_url=auth_manager.prometheus_url,
-                    token=getattr(auth_manager, 'prometheus_token', None),
-                    config=network_config
-                )
-                await network_collector.initialize()
-            except Exception as e:
-                return ETCDNetworkIOResponse(
-                    status="error",
-                    error=f"Failed to initialize NetworkIOCollector: {e}",
-                    timestamp=datetime.now(pytz.UTC).isoformat(),
-                    duration=duration
-                )
+        if not prometheus_client or not auth_manager or not config:
+            await initialize_components()
         
-        # Ensure collector is initialized
-        if not hasattr(network_collector, 'prometheus_client') or network_collector.prometheus_client is None:
-            await network_collector.initialize()
-        
-        # Use collect_all_metrics from the new module
-        result = await network_collector.collect_all_metrics(duration)
-        
-        # Derive status from summary (new module structure)
-        status = "success"
-        error = None
-        if result.get('summary'):
-            errors = result['summary'].get('errors', 0)
-            if errors > 0:
-                status = "error"
-                error = f"{errors} metric(s) failed to collect"
-        
-        return ETCDNetworkIOResponse(
-            status=status,
-            data=result,
-            error=error,
-            timestamp=result.get('timestamp', datetime.now(pytz.UTC).isoformat()),
-            duration=duration
+        collector = NetworkIOCollector(
+            prometheus_url=auth_manager.prometheus_url,
+            token=auth_manager.prometheus_token,
+            config=config
         )
         
+        try:
+            await collector.initialize()
+            network_data = await asyncio.wait_for(
+                collector.collect_all_metrics(duration=duration), timeout=60.0
+            )
+            
+            return NetworkMetricsResponse(
+                status="success",
+                data=network_data,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                category="network_io",
+                duration=duration
+            )
+            
+        finally:
+            await collector.close()
+        
+    except asyncio.TimeoutError:
+        return NetworkMetricsResponse(
+            status="error",
+            error="Timeout collecting network I/O metrics",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            category="network_io",
+            duration=duration
+        )
     except Exception as e:
-        logger.error(f"Error collecting network I/O metrics: {e}")
-        return ETCDNetworkIOResponse(
+        logger.error(f"Error collecting network I/O: {e}")
+        return NetworkMetricsResponse(
             status="error",
             error=str(e),
-            timestamp=datetime.now(pytz.UTC).isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            category="network_io",
             duration=duration
         )
+
 
 @mcp.tool()
 async def get_etcd_disk_io(duration: str = "1h") -> ETCDDiskIOResponse:
