@@ -293,7 +293,15 @@ async def initialize_collectors():
         # Network IO Collector - uses metrics-net.yml
         logger.info("Initializing NetworkIOCollector...")
         metrics_net_file = os.path.join(PROJECT_ROOT, 'config', 'metrics-net.yml')
-        network_config = Config(metrics_file=metrics_net_file)
+        network_config = Config()
+        # Load metrics file explicitly
+        load_result = network_config.load_metrics_file(metrics_net_file)
+        if not load_result.get('success'):
+            logger.error(f"Failed to load network metrics file: {load_result.get('error', 'Unknown error')}")
+            logger.warning("NetworkIOCollector will be initialized but may not have metrics")
+        else:
+            logger.info(f"Loaded {load_result.get('metrics_loaded', 0)} network metrics from {metrics_net_file}")
+        
         network_collector = NetworkIOCollector(
             prometheus_url=auth_manager.prometheus_url,
             token=getattr(auth_manager, 'prometheus_token', None),
@@ -825,7 +833,21 @@ async def get_network_io_node(
                     )
             try:
                 metrics_net_file = os.path.join(PROJECT_ROOT, 'config', 'metrics-net.yml')
-                network_config = Config(metrics_file=metrics_net_file)
+                network_config = Config()
+                # Load metrics file explicitly
+                load_result = network_config.load_metrics_file(metrics_net_file)
+                if not load_result.get('success'):
+                    error_msg = load_result.get('error', 'Unknown error loading metrics file')
+                    logger.error(f"Failed to load metrics file: {error_msg}")
+                    return NetworkMetricsResponse(
+                        status="error",
+                        error=f"Failed to load metrics file: {error_msg}",
+                        timestamp=datetime.now(pytz.UTC).isoformat(),
+                        category="network_io",
+                        duration=duration
+                    )
+                logger.info(f"Loaded {load_result.get('metrics_loaded', 0)} metrics from {metrics_net_file}")
+                
                 network_collector = NetworkIOCollector(
                     prometheus_url=auth_manager.prometheus_url,
                     token=getattr(auth_manager, 'prometheus_token', None),

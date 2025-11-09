@@ -30,7 +30,20 @@ class NetworkIOCollector:
         self.prometheus_client = PrometheusBaseQuery(prometheus_url, token)
         self.utility = mcpToolsUtility()
         # Prefer provided config; otherwise load network metrics from metrics-net.yml
-        self.config = config or Config(metrics_file="config/metrics-net.yml")
+        if config is None:
+            self.config = Config()
+            # Try to load metrics-net.yml from common locations
+            import os
+            import sys
+            # Get project root (assuming this file is in tools/net/)
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(os.path.dirname(current_dir))
+            metrics_net_file = os.path.join(project_root, 'config', 'metrics-net.yml')
+            load_result = self.config.load_metrics_file(metrics_net_file)
+            if not load_result.get('success'):
+                logger.warning(f"Failed to load metrics file {metrics_net_file}: {load_result.get('error', 'Unknown error')}")
+        else:
+            self.config = config
         
         # Get network_io metrics from config
         self.metrics = self.config.get_metrics_by_category('network_io')
