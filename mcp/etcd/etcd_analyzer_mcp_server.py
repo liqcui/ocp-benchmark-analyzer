@@ -845,6 +845,43 @@ async def get_network_io_node(
         if not hasattr(network_collector, 'prometheus_client') or network_collector.prometheus_client is None:
             await network_collector.initialize()
         
+        # Check if metrics are loaded
+        if not hasattr(network_collector, 'metrics') or not network_collector.metrics:
+            logger.warning("NetworkIOCollector has no metrics loaded from config")
+            return NetworkMetricsResponse(
+                status="error",
+                error="No network metrics configured. Please check metrics-net.yml configuration.",
+                timestamp=datetime.now(pytz.UTC).isoformat(),
+                category="network_io",
+                duration=duration
+            )
+        
+        logger.info(f"Collecting network I/O metrics with {len(network_collector.metrics)} metrics configured")
+        
+        # Test Prometheus connectivity and node groups
+        try:
+            test_query = "up"
+            test_result = await network_collector.prometheus_client.query_instant(test_query)
+            if test_result and test_result.get('result'):
+                logger.info(f"Prometheus connectivity test successful: {len(test_result.get('result', []))} results")
+            else:
+                logger.warning("Prometheus connectivity test returned no results - Prometheus may be unreachable or empty")
+        except Exception as test_err:
+            logger.warning(f"Prometheus connectivity test failed: {test_err}")
+        
+        # Test node groups retrieval
+        try:
+            node_groups_test = await network_collector.utility.get_node_groups(network_collector.prometheus_client)
+            if node_groups_test:
+                total_nodes = sum(len(nodes) for nodes in node_groups_test.values())
+                logger.info(f"Node groups retrieved successfully: {total_nodes} total nodes across {len(node_groups_test)} roles")
+                for role, nodes in node_groups_test.items():
+                    logger.debug(f"  {role}: {len(nodes)} nodes")
+            else:
+                logger.warning("Node groups retrieval returned empty - this will cause all metrics to be empty")
+        except Exception as ng_err:
+            logger.warning(f"Node groups retrieval failed: {ng_err} - this will cause all metrics to be empty")
+        
         # Use collect_all_metrics from the new module
         network_data = await asyncio.wait_for(
             network_collector.collect_all_metrics(duration=duration), timeout=60.0
@@ -854,10 +891,19 @@ async def get_network_io_node(
         status = "success"
         error = None
         if network_data.get('summary'):
-            errors = network_data['summary'].get('errors', 0)
+            summary = network_data['summary']
+            errors = summary.get('errors', 0)
+            empty = summary.get('empty', 0)
+            with_data = summary.get('with_data', 0)
+            
             if errors > 0:
                 status = "error"
                 error = f"{errors} metric(s) failed to collect"
+            elif empty == summary.get('total_metrics', 0) and with_data == 0:
+                # All metrics are empty - this is a problem
+                status = "warning"
+                error = f"All {empty} metrics returned empty results. This may indicate: 1) Prometheus queries are not matching any data, 2) Time range has no data, 3) Metrics are not available in Prometheus, or 4) Node grouping failed. Check Prometheus connectivity and metric availability."
+                logger.warning(f"All network I/O metrics are empty. Total: {summary.get('total_metrics', 0)}, Empty: {empty}, With Data: {with_data}")
         
         return NetworkMetricsResponse(
             status=status,

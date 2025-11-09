@@ -283,12 +283,22 @@ class NetworkIOCollector:
         """Network RX utilization in bits per second"""
         metric = next((m for m in self.metrics if m['name'] == 'network_io_node_network_rx_utilization'), None)
         if not metric:
+            logger.warning("Metric 'network_io_node_network_rx_utilization' not found in config")
             return {}
         
         node_values = await self._query_metric_with_fallback(metric['expr'], duration)
-        node_groups = await self.utility.get_node_groups(self.prometheus_client)
+        if not node_values:
+            logger.debug(f"No node values returned for {metric['name']}")
         
-        return self._process_metric_results(node_values, node_groups, metric['name'], metric['unit'])
+        node_groups = await self.utility.get_node_groups(self.prometheus_client)
+        if not node_groups:
+            logger.warning(f"No node groups found for {metric['name']} - this will result in empty metrics")
+        
+        result = self._process_metric_results(node_values, node_groups, metric['name'], metric['unit'])
+        if not result.get('controlplane', {}).get('nodes') and not result.get('worker', {}).get('top3'):
+            logger.debug(f"Processed result for {metric['name']} is empty - node_values: {len(node_values)}, node_groups: {len(node_groups) if node_groups else 0}")
+        
+        return result
     
     async def network_io_node_network_tx_utilization(self, duration: str = "5m") -> Dict[str, Any]:
         """Network TX utilization in bits per second"""
