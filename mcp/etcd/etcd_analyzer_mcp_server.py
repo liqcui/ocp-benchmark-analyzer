@@ -755,7 +755,13 @@ async def get_etcd_disk_backend_commit(duration: str = "1h") -> ETCDBackendCommi
         )
 
 @mcp.tool()
-async def get_network_io_node(request: NetworkIORequest) -> NetworkMetricsResponse:
+async def get_network_io_node(
+    duration: str = "5m",
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
+    include_metrics: Optional[List[str]] = None,
+    node_groups: Optional[List[str]] = None
+) -> NetworkMetricsResponse:
     """
     Get comprehensive cluster node level network I/O metrics and performance statistics.
     
@@ -786,44 +792,87 @@ async def get_network_io_node(request: NetworkIORequest) -> NetworkMetricsRespon
         duration: Time range for metrics (e.g., '5m', '15m', '1h', '6h', '1d'). Default: '5m'
         start_time: Optional start time in ISO format (YYYY-MM-DDTHH:MM:SSZ)
         end_time: Optional end time in ISO format (YYYY-MM-DDTHH:MM:SSZ)
+        include_metrics: Optional list of specific metrics to include
+        node_groups: Optional list of node groups to filter (e.g., ['controlplane', 'worker'])
     
     Returns:
         NetworkMetricsResponse: Network I/O performance metrics grouped by node role
     """
-    global prometheus_client, auth_manager, config
-    duration = request.duration
     try:
-        if not prometheus_client or not auth_manager or not config:
-            await initialize_components()
+        global auth_manager, network_collector, config, PROJECT_ROOT
         
-        collector = NetworkIOCollector(
-            prometheus_url=auth_manager.prometheus_url,
-            token=auth_manager.prometheus_token,
-            config=config
+        # Use duration from time range if provided
+        if start_time and end_time:
+            computed_duration = _duration_from_time_range(start_time, end_time)
+            if computed_duration:
+                duration = computed_duration
+        
+        if not network_collector:
+            # Lazy initialize if startup initialization didn't complete
+            if auth_manager is None:
+                if config is None:
+                    config = Config()
+                auth_manager = OpenShiftAuth(config.kubeconfig_path if config else None)
+                try:
+                    await auth_manager.initialize()
+                except Exception:
+                    return NetworkMetricsResponse(
+                        status="error",
+                        error="Failed to initialize OpenShift auth for network I/O",
+                        timestamp=datetime.now(pytz.UTC).isoformat(),
+                        category="network_io",
+                        duration=duration
+                    )
+            try:
+                metrics_net_file = os.path.join(PROJECT_ROOT, 'config', 'metrics-net.yml')
+                network_config = Config(metrics_file=metrics_net_file)
+                network_collector = NetworkIOCollector(
+                    prometheus_url=auth_manager.prometheus_url,
+                    token=getattr(auth_manager, 'prometheus_token', None),
+                    config=network_config
+                )
+                await network_collector.initialize()
+            except Exception as e:
+                return NetworkMetricsResponse(
+                    status="error",
+                    error=f"Failed to initialize NetworkIOCollector: {e}",
+                    timestamp=datetime.now(pytz.UTC).isoformat(),
+                    category="network_io",
+                    duration=duration
+                )
+        
+        # Ensure collector is initialized
+        if not hasattr(network_collector, 'prometheus_client') or network_collector.prometheus_client is None:
+            await network_collector.initialize()
+        
+        # Use collect_all_metrics from the new module
+        network_data = await asyncio.wait_for(
+            network_collector.collect_all_metrics(duration=duration), timeout=60.0
         )
         
-        try:
-            await collector.initialize()
-            network_data = await asyncio.wait_for(
-                collector.collect_all_metrics(duration=duration), timeout=60.0
-            )
-            
-            return NetworkMetricsResponse(
-                status="success",
-                data=network_data,
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                category="network_io",
-                duration=duration
-            )
-            
-        finally:
-            await collector.close()
+        # Derive status from summary (new module structure)
+        status = "success"
+        error = None
+        if network_data.get('summary'):
+            errors = network_data['summary'].get('errors', 0)
+            if errors > 0:
+                status = "error"
+                error = f"{errors} metric(s) failed to collect"
+        
+        return NetworkMetricsResponse(
+            status=status,
+            data=network_data,
+            error=error,
+            timestamp=network_data.get('timestamp', datetime.now(pytz.UTC).isoformat()),
+            category="network_io",
+            duration=duration
+        )
         
     except asyncio.TimeoutError:
         return NetworkMetricsResponse(
             status="error",
             error="Timeout collecting network I/O metrics",
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(pytz.UTC).isoformat(),
             category="network_io",
             duration=duration
         )
@@ -832,7 +881,7 @@ async def get_network_io_node(request: NetworkIORequest) -> NetworkMetricsRespon
         return NetworkMetricsResponse(
             status="error",
             error=str(e),
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(pytz.UTC).isoformat(),
             category="network_io",
             duration=duration
         )
