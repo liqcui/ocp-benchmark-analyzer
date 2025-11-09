@@ -118,32 +118,6 @@ class EltUtility:
         html = re.sub(r'\s+', ' ', html.replace('\n', ' ').replace('\r', ''))
         return html.strip()
     
-    def create_html_table(self, df: pd.DataFrame, table_name: str) -> str:
-        """Generate HTML table from DataFrame with improved styling"""
-        try:
-            if df.empty:
-                return ""
-            
-            # Create styled HTML table
-            html = df.to_html(
-                index=False,
-                classes='table table-striped table-bordered table-sm',
-                escape=False,
-                table_id=f"table-{table_name.replace('_', '-')}",
-                border=1
-            )
-            
-            # Clean up HTML
-            html = self.clean_html(html)
-            
-            # Add responsive wrapper
-            html = f'<div class="table-responsive">{html}</div>'
-            
-            return html
-        except Exception as e:
-            logger.error(f"Failed to generate HTML table for {table_name}: {e}")
-            return f'<div class="alert alert-danger">Error generating table: {str(e)}</div>'
- 
     def limit_dataframe_columns(self, df: pd.DataFrame, max_cols: int = None, table_name: str = None) -> pd.DataFrame:
         """Limit DataFrame columns to maximum number - Updated with enhanced latency support"""
         if max_cols is None:
@@ -468,3 +442,113 @@ class EltUtility:
                 'data_reliability': 'unknown',
                 'is_critical': False
             }
+
+    def decode_unicode_escapes(self, text: str) -> str:
+        """Decode Unicode escape sequences to actual Unicode characters"""
+        try:
+            original = text
+            # Handle common Unicode escape patterns
+            # First decode standard Unicode escapes like \u26a0
+            text = text.encode('utf-8').decode('unicode_escape')
+            
+            # Additional specific replacements for common sequences
+            replacements = {
+                "\\u26a0\\ufe0f": "⚠️",  # warning sign with variation selector
+                "\\u26a0": "⚠",         # warning sign
+                "\\u2022": "•",         # bullet point
+                "\\u2713": "✓",         # check mark
+                "\\u2717": "✗",         # cross mark
+                "\\u27a1": "➡",         # right arrow
+                "\\u2b06": "⬆",         # up arrow
+                "\\u2b07": "⬇",         # down arrow
+                "\\u1f3c6": "🏆",       # trophy
+                "\\u1f4ca": "📊",       # bar chart
+                "\\u1f4c8": "📈",       # chart increasing
+                "\\u1f4c9": "📉",       # chart decreasing
+                "\\u1f534": "🔴",       # red circle
+                "\\u1f7e1": "🟡",       # yellow circle
+                "\\u1f7e2": "🟢",       # green circle
+                "\\ufe0f": "",          # variation selector (remove if standalone)
+            }
+            
+            for escape_seq, replacement in replacements.items():
+                text = text.replace(escape_seq, replacement)
+            
+            # Fix common UTF-8 mojibake sequences (double-encoded as Latin-1)
+            try:
+                if any(marker in text for marker in ["Ã", "â€", "â„¢", "œ"]):
+                    text = text.encode('latin1', errors='ignore').decode('utf-8', errors='ignore')
+            except Exception:
+                pass
+            
+            return text
+            
+        except (UnicodeDecodeError, UnicodeError) as e:
+            logger.warning(f"Failed to decode Unicode escapes in text: {e}")
+            # Fallback: just replace the specific sequences we know about
+            fallback_replacements = {
+                "\\u26a0\\ufe0f": "⚠️",
+                "\\u26a0": "⚠",
+                "\\u2022": "•",
+                "\\u2713": "✓",
+                "\\u2717": "✗",
+                "\\u1f3c6": "🏆",
+            }
+            for escape_seq, replacement in fallback_replacements.items():
+                text = text.replace(escape_seq, replacement)
+            return text
+
+    def create_html_table(self, df: pd.DataFrame, table_name: str) -> str:
+        """Generate HTML table from DataFrame with improved styling and Unicode handling"""
+        try:
+            if df.empty:
+                return ""
+            
+            # Create a copy to avoid modifying the original DataFrame
+            df_copy = df.copy()
+            
+            # If columns are MultiIndex, flatten them to single string names
+            try:
+                if isinstance(df_copy.columns, pd.MultiIndex):
+                    df_copy.columns = [
+                        "_".join([str(part) for part in col if part is not None])
+                        for col in df_copy.columns.values
+                    ]
+                else:
+                    # Ensure all column names are strings
+                    df_copy.columns = [str(c) for c in df_copy.columns]
+            except Exception:
+                # Best-effort fallback: cast column names to strings
+                df_copy.columns = [str(c) for c in df_copy.columns]
+
+            # Apply Unicode decoding to all object (string-like) columns safely
+            try:
+                object_columns = list(df_copy.select_dtypes(include=['object']).columns)
+                for col in object_columns:
+                    df_copy[col] = df_copy[col].astype(str).apply(self.decode_unicode_escapes)
+            except Exception:
+                pass
+            
+            # Create styled HTML table
+            html = df_copy.to_html(
+                index=False,
+                classes='table table-striped table-bordered table-sm',
+                escape=False,
+                table_id=f"table-{table_name.replace('_', '-')}",
+                border=1
+            )
+            
+            # Additional cleanup for any remaining Unicode issues
+            html = self.decode_unicode_escapes(html)
+            
+            # Clean up HTML
+            html = self.clean_html(html)
+            
+            # Add responsive wrapper
+            html = f'<div class="table-responsive">{html}</div>'
+            
+            return html
+            
+        except Exception as e:
+            logger.error(f"Failed to generate HTML table for {table_name}: {e}")
+            return f'<div class="alert alert-danger">Error generating table: {str(e)}</div>'            

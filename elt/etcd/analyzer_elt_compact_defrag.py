@@ -1,483 +1,439 @@
 """
-ELT module for etcd compact and defrag data processing
-Specialized module for extracting, transforming and loading compact/defrag metrics
+Extract, Load, Transform module for etcd Compact and Defrag Metrics
+Handles compact/defrag data from tools/etcd/etcd_disk_compact_defrag.py
+ONLY contains compact_defrag specific logic - no generic utilities
 """
 
 import logging
-from typing import Dict, Any, List, Union
+from typing import Dict, Any, List
 import pandas as pd
-from .etcd_analyzer_elt_utility import utilityELT
+from ..utils.analyzer_elt_utility import utilityELT
 
 logger = logging.getLogger(__name__)
 
+
 class compactDefragELT(utilityELT):
-    """Extract, Load, Transform class for compact defrag data"""
+    """Extract, Load, Transform class for etcd compact and defrag metrics data"""
     
     def __init__(self):
         super().__init__()
-        self.metric_categories = {
-            'compaction': ['debugging_mvcc_db_compaction_duration_sum_delta', 'debugging_mvcc_db_compaction_duration_sum'],
-            'defragmentation': ['disk_backend_defrag_duration_sum_rate', 'disk_backend_defrag_duration_sum'],
-            'page_faults': ['vmstat_pgmajfault_rate', 'vmstat_pgmajfault_total']
+        self.metric_configs = {
+            'debugging_mvcc_db_compacted_keys': {
+                'title': 'DB Compacted Keys',
+                'unit': 'count',
+                'thresholds': {'critical': 50000, 'warning': 30000}
+            },
+            'debugging_mvcc_db_compaction_duration_sum_delta': {
+                'title': 'DB Compaction Rate',
+                'unit': 'milliseconds',
+                'thresholds': {'critical': 100, 'warning': 50}
+            },
+            'debugging_mvcc_db_compaction_duration_sum': {
+                'title': 'DB Compaction Duration',
+                'unit': 'milliseconds',
+                'thresholds': {'critical': 5000, 'warning': 3000}
+            },
+            'debugging_snapshot_duration': {
+                'title': 'Snapshot Duration',
+                'unit': 'seconds',
+                'thresholds': {'critical': 5.0, 'warning': 2.0}
+            },
+            'disk_backend_defrag_duration_sum_rate': {
+                'title': 'Defrag Rate',
+                'unit': 'seconds',
+                'thresholds': {'critical': 10.0, 'warning': 5.0}
+            },
+            'disk_backend_defrag_duration_sum': {
+                'title': 'Defrag Duration',
+                'unit': 'seconds',
+                'thresholds': {'critical': 30.0, 'warning': 10.0}
+            }
         }
     
     def extract_compact_defrag(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Extract compact defrag data into structured format"""
-        try:
-            # Handle nested data structures and both 'metrics' and 'pods_metrics' layouts
-            metrics_data = None
-            master_nodes = []
-            summary_data = {}
-            category = data.get('category', 'disk_compact_defrag')
-            timestamp = data.get('timestamp', '')
-            duration = data.get('duration', '1h')
-
-            # Handle the actual JSON structure from your data
-            if isinstance(data.get('data'), dict):
-                inner = data['data']
-                if 'pods_metrics' in inner and isinstance(inner['pods_metrics'], dict):
-                    metrics_data = inner['pods_metrics']
-                    master_nodes = inner.get('master_nodes', [])
-                    summary_data = inner.get('summary', {})
-                elif 'metrics' in inner and isinstance(inner['metrics'], dict):
-                    metrics_data = inner['metrics']
-                    master_nodes = inner.get('master_nodes', [])
-                    summary_data = inner.get('summary', {})
-            elif 'pods_metrics' in data and isinstance(data['pods_metrics'], dict):
-                metrics_data = data['pods_metrics']
-                master_nodes = data.get('master_nodes', [])
-                summary_data = data.get('summary', {})
-            elif 'metrics' in data and isinstance(data['metrics'], dict):
-                metrics_data = data['metrics']
-                master_nodes = data.get('master_nodes', [])
-                summary_data = data.get('summary', {})
-            else:
-                return {'error': 'No pods_metrics or metrics data found in compact defrag results'}
-            
-            structured = {
-                'timestamp': timestamp,
-                'duration': duration,
-                'category': category,
-                'master_nodes': master_nodes,
-                'summary': summary_data,
-                'metrics_overview': [],
-                'compaction_metrics': [],
-                'defragmentation_metrics': [],
-                'page_fault_metrics': [],
-                'snapshot_metrics': [],
-                'pod_performance': [],
-                'node_performance': []
-            }
-            
-            # Process each metric
-            for metric_name, metric_info in metrics_data.items():
-                if metric_info.get('status') != 'success':
-                    continue
-                
-                # Add to metrics overview (prefer 'overall' if present)
-                overall = metric_info.get('overall', {}) or metric_info.get('statistics', {})
-                # statistics may use nested {'avg': {'raw': ...}} in summaries; handle gracefully
-                def get_stat(key):
-                    val = overall.get(key, 0)
-                    if isinstance(val, dict):
-                        return val.get('raw', 0)
-                    return val
-                
-                # Get raw numeric values for processing
-                avg_raw = get_stat('avg')
-                max_raw = get_stat('max') 
-                latest_raw = get_stat('latest')
-                
-                overview_item = {
-                    'Metric': self.format_metric_name(metric_name),
-                    'Category': self.categorize_compact_defrag_metric(metric_name),
-                    'Unit': metric_info.get('unit', ''),
-                    'Average': avg_raw,  # Store raw numeric value
-                    'Maximum': max_raw,  # Store raw numeric value  
-                    'Latest': latest_raw,  # Store raw numeric value
-                    'avg_raw': avg_raw,   # Keep raw values for highlighting
-                    'max_raw': max_raw,
-                    'latest_raw': latest_raw
-                }
-                structured['metrics_overview'].append(overview_item)
-                
-                # Process pod/instance data
-                pod_data = metric_info.get('data', {})
-                
-                # Handle pod-based metrics (compaction, defragmentation)
-                if 'pods' in pod_data:
-                    for pod_name, pod_info in pod_data['pods'].items():
-                        # Skip 'unknown' pods unless they have meaningful data
-                        if pod_name == 'unknown' and pod_info.get('avg', 0) == 0:
-                            continue
-                            
-                        avg_val = pod_info.get('avg', 0)
-                        max_val = pod_info.get('max', 0)
-                        latest_val = pod_info.get('latest', 0)
-                        
-                        pod_item = {
-                            'Pod': self.truncate_node_name(pod_name, 30),
-                            'Node': self.truncate_node_name(pod_info.get('node', 'unknown'), 25),
-                            'Metric': self.format_metric_name(metric_name),
-                            'Average': avg_val,  # Store raw numeric value
-                            'Maximum': max_val,  # Store raw numeric value
-                            'Latest': latest_val,  # Store raw numeric value
-                            'avg_raw': avg_val,   # Keep for highlighting
-                            'max_raw': max_val,
-                            'latest_raw': latest_val,
-                            'Unit': metric_info.get('unit', '')  # Store unit in separate column
-                        }
-                        structured['pod_performance'].append(pod_item)
-                
-                # Handle instance-based metrics (vmstat)
-                elif 'instances' in pod_data:
-                    for instance_name, instance_info in pod_data['instances'].items():
-                        avg_val = instance_info.get('avg', 0)
-                        max_val = instance_info.get('max', 0)
-                        latest_val = instance_info.get('latest', 0)
-                        
-                        instance_item = {
-                            'Instance': self.truncate_node_name(instance_name, 30),
-                            'Node': self.truncate_node_name(instance_info.get('node', 'unknown'), 25),
-                            'Metric': self.format_metric_name(metric_name),
-                            'Average': avg_val,  # Store raw numeric value
-                            'Maximum': max_val,  # Store raw numeric value
-                            'Latest': latest_val,  # Store raw numeric value
-                            'avg_raw': avg_val,   # Keep for highlighting
-                            'max_raw': max_val,
-                            'latest_raw': latest_val,
-                            'unit': metric_info.get('unit', '')
-                        }
-                        structured['node_performance'].append(instance_item)
-                
-                # Categorize metrics
-                category = self.categorize_compact_defrag_metric(metric_name)
-                if category == 'Compaction':
-                    structured['compaction_metrics'].append(overview_item)
-                elif category == 'Defragmentation':
-                    structured['defragmentation_metrics'].append(overview_item)
-                elif category == 'Page Faults':
-                    structured['page_fault_metrics'].append(overview_item)
-                elif category == 'Snapshot':
-                    structured['snapshot_metrics'].append(overview_item)
-            
+        """Extract compact defrag information from etcd_disk_compact_defrag.py output"""
+        
+        # Handle nested data structure
+        actual_data = data
+        if 'data' in data and isinstance(data.get('data'), dict):
+            actual_data = data['data']
+        
+        structured = {
+            'compact_defrag_overview': [],
+            'compacted_keys': [],
+            'compaction_rate': [],
+            'compaction_duration': [],
+            'snapshot_duration': [],
+            'defrag_rate': [],
+            'defrag_duration': []
+        }
+        
+        # Extract pods_metrics or metrics
+        metrics_data = actual_data.get('pods_metrics') or actual_data.get('metrics', {})
+        master_nodes = actual_data.get('master_nodes', [])
+        
+        if not metrics_data:
             return structured
+        
+        # Process each metric
+        for metric_name, metric_info in metrics_data.items():
+            if metric_info.get('status') != 'success':
+                continue
             
+            if metric_name == 'debugging_mvcc_db_compacted_keys':
+                self._extract_compacted_keys(metric_info, structured)
+            elif metric_name == 'debugging_mvcc_db_compaction_duration_sum_delta':
+                self._extract_compaction_rate(metric_info, structured)
+            elif metric_name == 'debugging_mvcc_db_compaction_duration_sum':
+                self._extract_compaction_duration(metric_info, structured)
+            elif metric_name == 'debugging_snapshot_duration':
+                self._extract_snapshot_duration(metric_info, structured)
+            elif metric_name == 'disk_backend_defrag_duration_sum_rate':
+                self._extract_defrag_rate(metric_info, structured)
+            elif metric_name == 'disk_backend_defrag_duration_sum':
+                self._extract_defrag_duration(metric_info, structured)
+        
+        # Generate overview
+        self._generate_overview(metrics_data, master_nodes, structured)
+        
+        return structured
+    
+    def _extract_compacted_keys(self, metric_info: Dict[str, Any], 
+                                structured: Dict[str, Any]):
+        """Extract compacted keys metric"""
+        pods_data = metric_info.get('data', {}).get('pods', {})
+        
+        # Collect all values for top identification
+        all_values = []
+        for pod_name, pod_info in pods_data.items():
+            if pod_name == 'unknown' and pod_info.get('avg', 0) == 0:
+                continue
+            avg_val = float(pod_info.get('avg', 0))
+            all_values.append((pod_name, pod_info, avg_val))
+        
+        # Find top 1
+        top_avg = max((v[2] for v in all_values), default=0) if all_values else 0
+        
+        # Format rows
+        thresholds = self.metric_configs['debugging_mvcc_db_compacted_keys']['thresholds']
+        for pod_name, pod_info, avg_val in all_values:
+            is_top = (avg_val == top_avg and avg_val > 0)
+            
+            avg_display = self.highlight_critical_values(
+                avg_val, thresholds, '', is_top
+            )
+            max_display = self.highlight_critical_values(
+                pod_info.get('max', 0), thresholds, ''
+            )
+            
+            structured['compacted_keys'].append({
+                'Pod': self.truncate_node_name(pod_name, 30),
+                'Node': self.truncate_node_name(pod_info.get('node', 'unknown'), 25),
+                'Average': avg_display,
+                'Maximum': max_display,
+                'Latest': int(pod_info.get('latest', 0))
+            })
+    
+    def _extract_compaction_rate(self, metric_info: Dict[str, Any], 
+                                 structured: Dict[str, Any]):
+        """Extract compaction rate (delta) metric"""
+        pods_data = metric_info.get('data', {}).get('pods', {})
+        
+        # Collect all values for top identification
+        all_values = []
+        for pod_name, pod_info in pods_data.items():
+            if pod_name == 'unknown' and pod_info.get('avg', 0) == 0:
+                continue
+            avg_val = float(pod_info.get('avg', 0))
+            all_values.append((pod_name, pod_info, avg_val))
+        
+        # Find top 1
+        top_avg = max((v[2] for v in all_values), default=0) if all_values else 0
+        
+        # Format rows
+        thresholds = self.metric_configs['debugging_mvcc_db_compaction_duration_sum_delta']['thresholds']
+        for pod_name, pod_info, avg_val in all_values:
+            is_top = (avg_val == top_avg and avg_val > 0)
+            
+            avg_display = self.format_and_highlight(
+                avg_val, 'milliseconds', thresholds, is_top
+            )
+            max_display = self.format_and_highlight(
+                pod_info.get('max', 0), 'milliseconds', thresholds
+            )
+            
+            structured['compaction_rate'].append({
+                'Pod': self.truncate_node_name(pod_name, 30),
+                'Node': self.truncate_node_name(pod_info.get('node', 'unknown'), 25),
+                'Average': avg_display,
+                'Maximum': max_display,
+                'Latest': self.format_value_with_unit(pod_info.get('latest', 0), 'milliseconds')
+            })
+    
+    def _extract_compaction_duration(self, metric_info: Dict[str, Any], 
+                                    structured: Dict[str, Any]):
+        """Extract compaction duration (cumulative) metric"""
+        pods_data = metric_info.get('data', {}).get('pods', {})
+        
+        # Collect all values for top identification
+        all_values = []
+        for pod_name, pod_info in pods_data.items():
+            if pod_name == 'unknown' and pod_info.get('avg', 0) == 0:
+                continue
+            avg_val = float(pod_info.get('avg', 0))
+            all_values.append((pod_name, pod_info, avg_val))
+        
+        # Find top 1
+        top_avg = max((v[2] for v in all_values), default=0) if all_values else 0
+        
+        # Format rows
+        thresholds = self.metric_configs['debugging_mvcc_db_compaction_duration_sum']['thresholds']
+        for pod_name, pod_info, avg_val in all_values:
+            is_top = (avg_val == top_avg and avg_val > 0)
+            
+            avg_display = self.format_and_highlight(
+                avg_val, 'milliseconds', thresholds, is_top
+            )
+            max_display = self.format_and_highlight(
+                pod_info.get('max', 0), 'milliseconds', thresholds
+            )
+            
+            structured['compaction_duration'].append({
+                'Pod': self.truncate_node_name(pod_name, 30),
+                'Node': self.truncate_node_name(pod_info.get('node', 'unknown'), 25),
+                'Average': avg_display,
+                'Maximum': max_display,
+                'Latest': self.format_value_with_unit(pod_info.get('latest', 0), 'milliseconds')
+            })
+    
+    def _extract_snapshot_duration(self, metric_info: Dict[str, Any], 
+                                   structured: Dict[str, Any]):
+        """Extract snapshot duration metric"""
+        pods_data = metric_info.get('data', {}).get('pods', {})
+        
+        # Collect all values for top identification
+        all_values = []
+        for pod_name, pod_info in pods_data.items():
+            if pod_name == 'unknown':
+                continue
+            avg_val = float(pod_info.get('avg', 0))
+            all_values.append((pod_name, pod_info, avg_val))
+        
+        # Find top 1
+        top_avg = max((v[2] for v in all_values), default=0) if all_values else 0
+        
+        # Format rows
+        thresholds = self.metric_configs['debugging_snapshot_duration']['thresholds']
+        for pod_name, pod_info, avg_val in all_values:
+            is_top = (avg_val == top_avg and avg_val > 0)
+            
+            avg_display = self.format_and_highlight(
+                avg_val, 'seconds', thresholds, is_top
+            )
+            max_display = self.format_and_highlight(
+                pod_info.get('max', 0), 'seconds', thresholds
+            )
+            
+            structured['snapshot_duration'].append({
+                'Pod': self.truncate_node_name(pod_name, 30),
+                'Node': self.truncate_node_name(pod_info.get('node', 'unknown'), 25),
+                'Average': avg_display,
+                'Maximum': max_display,
+                'Latest': self.format_value_with_unit(pod_info.get('latest', 0), 'seconds')
+            })
+    
+    def _extract_defrag_rate(self, metric_info: Dict[str, Any], 
+                            structured: Dict[str, Any]):
+        """Extract defrag rate metric"""
+        pods_data = metric_info.get('data', {}).get('pods', {})
+        
+        # Collect all values for top identification
+        all_values = []
+        for pod_name, pod_info in pods_data.items():
+            if pod_name == 'unknown' and pod_info.get('avg', 0) == 0:
+                continue
+            avg_val = float(pod_info.get('avg', 0))
+            all_values.append((pod_name, pod_info, avg_val))
+        
+        # Find top 1
+        top_avg = max((v[2] for v in all_values), default=0) if all_values else 0
+        
+        # Format rows
+        thresholds = self.metric_configs['disk_backend_defrag_duration_sum_rate']['thresholds']
+        for pod_name, pod_info, avg_val in all_values:
+            is_top = (avg_val == top_avg and avg_val > 0)
+            
+            avg_display = self.format_and_highlight(
+                avg_val, 'seconds', thresholds, is_top
+            )
+            max_display = self.format_and_highlight(
+                pod_info.get('max', 0), 'seconds', thresholds
+            )
+            
+            structured['defrag_rate'].append({
+                'Pod': self.truncate_node_name(pod_name, 30),
+                'Node': self.truncate_node_name(pod_info.get('node', 'unknown'), 25),
+                'Average': avg_display,
+                'Maximum': max_display,
+                'Latest': self.format_value_with_unit(pod_info.get('latest', 0), 'seconds')
+            })
+    
+    def _extract_defrag_duration(self, metric_info: Dict[str, Any], 
+                                structured: Dict[str, Any]):
+        """Extract defrag duration (cumulative) metric"""
+        pods_data = metric_info.get('data', {}).get('pods', {})
+        
+        # Collect all values for top identification
+        all_values = []
+        for pod_name, pod_info in pods_data.items():
+            if pod_name == 'unknown' and pod_info.get('avg', 0) == 0:
+                continue
+            avg_val = float(pod_info.get('avg', 0))
+            all_values.append((pod_name, pod_info, avg_val))
+        
+        # Find top 1
+        top_avg = max((v[2] for v in all_values), default=0) if all_values else 0
+        
+        # Format rows
+        thresholds = self.metric_configs['disk_backend_defrag_duration_sum']['thresholds']
+        for pod_name, pod_info, avg_val in all_values:
+            is_top = (avg_val == top_avg and avg_val > 0)
+            
+            avg_display = self.format_and_highlight(
+                avg_val, 'seconds', thresholds, is_top
+            )
+            max_display = self.format_and_highlight(
+                pod_info.get('max', 0), 'seconds', thresholds
+            )
+            
+            structured['defrag_duration'].append({
+                'Pod': self.truncate_node_name(pod_name, 30),
+                'Node': self.truncate_node_name(pod_info.get('node', 'unknown'), 25),
+                'Average': avg_display,
+                'Maximum': max_display,
+                'Latest': self.format_value_with_unit(pod_info.get('latest', 0), 'seconds')
+            })
+    
+    def _generate_overview(self, metrics_data: Dict[str, Any], 
+                          master_nodes: List[str], 
+                          structured: Dict[str, Any]):
+        """Generate compact defrag overview"""
+        total_metrics = len([m for m in metrics_data.values() if m.get('status') == 'success'])
+        
+        # Count metrics by category
+        compaction_count = sum(1 for k in metrics_data.keys() 
+                              if 'compaction' in k.lower() or 'compacted' in k.lower())
+        defrag_count = sum(1 for k in metrics_data.keys() if 'defrag' in k.lower())
+        snapshot_count = sum(1 for k in metrics_data.keys() if 'snapshot' in k.lower())
+        
+        structured['compact_defrag_overview'].append({
+            'Category': 'Compaction',
+            'Metrics': compaction_count,
+            'Master Nodes': len(master_nodes),
+            'Status': self.create_status_badge('success', 'Active')
+        })
+        
+        if defrag_count > 0:
+            structured['compact_defrag_overview'].append({
+                'Category': 'Defragmentation',
+                'Metrics': defrag_count,
+                'Master Nodes': len(master_nodes),
+                'Status': self.create_status_badge('success', 'Active')
+            })
+        
+        if snapshot_count > 0:
+            structured['compact_defrag_overview'].append({
+                'Category': 'Snapshot',
+                'Metrics': snapshot_count,
+                'Master Nodes': len(master_nodes),
+                'Status': self.create_status_badge('success', 'Active')
+            })
+    
+    def summarize_compact_defrag(self, data: Dict[str, Any]) -> str:
+        """Generate compact defrag summary as HTML"""
+        try:
+            summary_items: List[str] = []
+            
+            overview_data = data.get('compact_defrag_overview', [])
+            
+            if overview_data:
+                total_metrics = sum(int(item.get('Metrics', 0)) for item in overview_data)
+                master_nodes = overview_data[0].get('Master Nodes', 0) if overview_data else 0
+                
+                summary_items.append(f"<li>Total Metrics: {total_metrics} across {master_nodes} master nodes</li>")
+                
+                for item in overview_data:
+                    category = item.get('Category', 'Unknown')
+                    metrics = item.get('Metrics', 0)
+                    summary_items.append(f"<li>{category}: {metrics} metrics collected</li>")
+            
+            # Add metric-specific summaries
+            if data.get('compacted_keys'):
+                avg_keys = sum(self.extract_numeric_value(row.get('Average', 0)) 
+                             for row in data['compacted_keys']) / len(data['compacted_keys'])
+                summary_items.append(f"<li>Average Compacted Keys: {self.format_count_value(avg_keys)}</li>")
+            
+            if data.get('compaction_duration'):
+                avg_duration = sum(self.extract_numeric_value(row.get('Average', 0)) 
+                                 for row in data['compaction_duration']) / len(data['compaction_duration'])
+                summary_items.append(f"<li>Average Compaction Duration: {self.format_value_with_unit(avg_duration, 'milliseconds')}</li>")
+            
+            return (
+                "<div class=\"compact-defrag-summary\">"
+                "<h4>Compact & Defrag Metrics Summary:</h4>"
+                "<ul>" + "".join(summary_items) + "</ul>"
+                "</div>"
+            )
+        
         except Exception as e:
-            logger.error(f"Error extracting compact defrag data: {e}")
-            return {'error': str(e)}
+            logger.error(f"Failed to generate compact defrag summary: {e}")
+            return f"Compact & Defrag metrics collected from {len(data)} categories"
     
     def transform_to_dataframes(self, structured_data: Dict[str, Any]) -> Dict[str, pd.DataFrame]:
         """Transform structured data into pandas DataFrames"""
+        dataframes = {}
+        
         try:
-            dataframes = {}
-            
-            # Create DataFrames from lists
-            for key, data_list in structured_data.items():
-                if isinstance(data_list, list) and data_list and key != 'master_nodes':
-                    df = pd.DataFrame(data_list)
+            for key, value in structured_data.items():
+                if isinstance(value, list) and value:
+                    df = pd.DataFrame(value)
                     if not df.empty:
-                        # Apply column limiting
-                        df = self.limit_dataframe_columns(df, table_name=key)
+                        # Decode unicode in object columns
+                        for col in df.columns:
+                            if df[col].dtype == 'object':
+                                df[col] = df[col].astype(str).apply(self.decode_unicode_escapes)
+                        
                         dataframes[key] = df
-            
-            return dataframes
-            
+        
         except Exception as e:
-            logger.error(f"Error transforming compact defrag data: {e}")
-            return {}
+            logger.error(f"Failed to transform compact defrag data to DataFrames: {e}")
+        
+        return dataframes
     
     def generate_html_tables(self, dataframes: Dict[str, pd.DataFrame]) -> Dict[str, str]:
-        """Generate HTML tables with highlighting for compact defrag data"""
-        try:
-            html_tables = {}
-            
-            for table_name, df in dataframes.items():
-                if df.empty:
-                    continue
-                
-                # Apply highlighting based on table type
-                df_styled = df.copy()
-                
-                if table_name == 'metrics_overview':
-                    # Highlight top performers in overview
-                    records = df.to_dict('records')
-                    top_avg_indices = self.identify_top_values(records, 'avg_raw') if 'avg_raw' in df.columns else []
-                    top_max_indices = self.identify_top_values(records, 'max_raw') if 'max_raw' in df.columns else []
-                    
-                    for idx, row in df_styled.iterrows():
-                        unit = row.get('Unit', '')
-                        
-                        # Format and highlight average values
-                        avg_raw = row.get('avg_raw', row.get('Average', 0))
-                        if idx in top_avg_indices:
-                            df_styled.loc[idx, 'Average'] = self.highlight_compact_defrag_values(
-                                avg_raw, 'average', unit, is_top=True
-                            )
-                        else:
-                            df_styled.loc[idx, 'Average'] = self.highlight_compact_defrag_values(
-                                avg_raw, 'average', unit
-                            )
-                        
-                        # Format and highlight maximum values
-                        max_raw = row.get('max_raw', row.get('Maximum', 0))
-                        if idx in top_max_indices:
-                            df_styled.loc[idx, 'Maximum'] = self.highlight_compact_defrag_values(
-                                max_raw, 'maximum', unit, is_top=True
-                            )
-                        else:
-                            df_styled.loc[idx, 'Maximum'] = self.highlight_compact_defrag_values(
-                                max_raw, 'maximum', unit
-                            )
-                        
-                        # Format latest values
-                        latest_raw = row.get('latest_raw', row.get('Latest', 0))
-                        df_styled.loc[idx, 'Latest'] = self.highlight_compact_defrag_values(
-                            latest_raw, 'latest', unit
-                        )
-                
-                elif table_name in ['pod_performance', 'node_performance']:
-                    # Create a copy to avoid dtype warnings
-                    df_copy = df_styled.copy()
-                    
-                    # Convert numeric columns to object type to allow string assignment
-                    for col in ['Average', 'Maximum', 'Latest']:
-                        if col in df_copy.columns:
-                            df_copy[col] = df_copy[col].astype('object')
-                    
-                    records = df.to_dict('records')
-                    top_avg_indices = self.identify_top_values(records, 'avg_raw') if 'avg_raw' in df.columns else []
-                    
-                    for idx, row in df_copy.iterrows():
-                        unit = row.get('Unit', '')
-                        
-                        # Format values with proper highlighting and units
-                        avg_raw = row.get('avg_raw', row.get('Average', 0))
-                        if idx in top_avg_indices:
-                            formatted_avg = self.format_compact_defrag_value(avg_raw, unit)
-                            df_copy.loc[idx, 'Average'] = f'<span class="text-primary font-weight-bold bg-light px-1">🏆 {formatted_avg}</span>'
-                        else:
-                            df_copy.loc[idx, 'Average'] = self.highlight_compact_defrag_values(avg_raw, 'performance', unit)
-                        
-                        max_raw = row.get('max_raw', row.get('Maximum', 0))
-                        latest_raw = row.get('latest_raw', row.get('Latest', 0))
-                        
-                        df_copy.loc[idx, 'Maximum'] = self.highlight_compact_defrag_values(max_raw, 'performance', unit)
-                        df_copy.loc[idx, 'Latest'] = self.highlight_compact_defrag_values(latest_raw, 'performance', unit)
-                    
-                    df_styled = df_copy
-
-                # Remove helper columns before HTML generation
-                columns_to_drop = ['avg_raw', 'max_raw', 'latest_raw', 'Unit']
-                for col in columns_to_drop:
-                    if col in df_styled.columns:
-                        df_styled = df_styled.drop(columns=[col])
-                                
-                # Remove "Node" column from Pod Performance table for cleaner display
-                if table_name == 'pod_performance' and 'Node' in df_styled.columns:
-                    try:
-                        df_styled = df_styled.drop(columns=['Node'])
-                    except Exception:
-                        pass
-
-                # Generate HTML table
-                html_tables[table_name] = self.create_html_table(df_styled, table_name)
-            
-            return html_tables
-            
-        except Exception as e:
-            logger.error(f"Error generating HTML tables: {e}")
-            return {}
-    
-    def summarize_compact_defrag(self, structured_data: Dict[str, Any]) -> str:
-        """Generate summary for compact defrag data"""
-        try:
-            summary_parts = []
-            
-            # Basic info
-            duration = structured_data.get('duration', '1h')
-            master_nodes_count = len(structured_data.get('master_nodes', []))
-            total_metrics = len(structured_data.get('metrics_overview', []))
-            
-            summary_parts.append(f"Compact & Defrag Analysis ({duration})")
-            summary_parts.append(f"• {total_metrics} metrics collected across {master_nodes_count} master nodes")
-            
-            # Compaction summary
-            compaction_metrics = structured_data.get('compaction_metrics', [])
-            if compaction_metrics:
-                avg_compaction_time = sum([m.get('avg_raw', m.get('Average', 0)) for m in compaction_metrics]) / len(compaction_metrics)
-                summary_parts.append(f"• Average compaction duration: {self.format_compact_defrag_value(avg_compaction_time, 'milliseconds')}")
-            
-            # Defragmentation summary
-            defrag_metrics = structured_data.get('defragmentation_metrics', [])
-            if defrag_metrics:
-                total_defrag_time = sum([m.get('avg_raw', m.get('Average', 0)) for m in defrag_metrics])
-                summary_parts.append(f"• Total defragmentation activity: {self.format_compact_defrag_value(total_defrag_time, 'seconds')}")
-            
-            # Page faults summary
-            page_fault_metrics = structured_data.get('page_fault_metrics', [])
-            if page_fault_metrics:
-                avg_page_faults = sum([m.get('avg_raw', m.get('Average', 0)) for m in page_fault_metrics]) / len(page_fault_metrics)
-                summary_parts.append(f"• Average page fault rate: {self.format_compact_defrag_value(avg_page_faults, 'faults/s')}")
-            
-            return " ".join(summary_parts)
-            
-        except Exception as e:
-            logger.error(f"Error generating summary: {e}")
-            return f"Summary generation failed: {str(e)}"
-    
-    def format_metric_name(self, metric_name: str) -> str:
-        """Format metric name for display"""
-        name_mapping = {
-            'debugging_mvcc_db_compacted_keys': 'DB Compacted Keys',
-            'debugging_mvcc_db_compaction_duration_sum_delta': 'DB Compaction Rate',
-            'debugging_mvcc_db_compaction_duration_sum': 'DB Compaction Duration',
-            'debugging_snapshot_duration': 'Snapshot Duration',
-            'disk_backend_defrag_duration_sum_rate': 'Defrag Rate',
-            'disk_backend_defrag_duration_sum': 'Defrag Duration',
-            'vmstat_pgmajfault_rate': 'Page Fault Rate',
-            'vmstat_pgmajfault_total': 'Total Page Faults'
-        }
-        return name_mapping.get(metric_name, metric_name.replace('_', ' ').title())
-    
-    def categorize_compact_defrag_metric(self, metric_name: str) -> str:
-        """Categorize compact defrag metric type"""
-        metric_lower = metric_name.lower()
+        """Generate HTML tables from DataFrames"""
+        html_tables = {}
         
-        if 'compaction' in metric_lower or 'compacted' in metric_lower:
-            return 'Compaction'
-        elif 'defrag' in metric_lower:
-            return 'Defragmentation'
-        elif 'snapshot' in metric_lower:
-            return 'Snapshot'
-        elif 'pgmajfault' in metric_lower or 'page' in metric_lower:
-            return 'Page Faults'
-        else:
-            return 'Other'
-    
-    def format_compact_defrag_value(self, value: Union[float, int], unit: str) -> str:
-        """Format compact defrag values with appropriate units"""
-        try:
-            # Convert to float for processing
-            if isinstance(value, str):
-                # Try to extract numeric value from string
-                try:
-                    value = float(value)
-                except (ValueError, TypeError):
-                    # If can't convert, try to extract first number
-                    import re
-                    numbers = re.findall(r'[\d.]+', str(value))
-                    if numbers:
-                        value = float(numbers[0])
-                    else:
-                        return str(value)
-            
-            value = float(value)
-            
-            if unit == 'count':
-                # Handle count values (like compacted keys)
-                if value == 0:
-                    return "0"
-                elif value >= 1000000:
-                    return f"{value/1000000:.1f}M"
-                elif value >= 1000:
-                    return f"{value/1000:.1f}K"
-                else:
-                    return f"{value:,.0f}"
-            elif unit == 'milliseconds' or unit == 'ms':
-                if value == 0:
-                    return "0 ms"
-                elif value < 1:
-                    return f"{value*1000:.0f} μs"
-                elif value < 1000:
-                    return f"{value:.1f} ms"
-                else:
-                    return f"{value/1000:.2f} s"
-            elif unit == 'seconds' or unit == 's':
-                if value == 0:
-                    return "0 s"
-                elif abs(value) < 1e-6:  # Very small values (like snapshot duration)
-                    return f"{value*1000000:.3f} μs"
-                elif abs(value) < 1e-3:
-                    return f"{value*1000:.3f} ms"
-                elif value < 1:
-                    return f"{value*1000:.1f} ms"
-                elif value < 60:
-                    return f"{value:.3f} s"
-                else:
-                    return f"{value/60:.1f} min"
-            elif unit in ['faults/s', 'faults']:
-                if value == 0:
-                    return "0 faults/s" if unit == 'faults/s' else "0 faults"
-                elif value < 0.001:
-                    return f"{value*1000:.2f} mfaults/s"
-                elif value < 1:
-                    return f"{value:.3f} faults/s"
-                else:
-                    return f"{value:.1f} faults/s"
-            else:
-                if value == 0:
-                    return "0"
-                else:
-                    return f"{value:.2f}"
-                    
-        except (ValueError, TypeError):
-            return str(value)   
-
-    def highlight_compact_defrag_values(self, value: Union[float, int], metric_type: str, unit: str = "", is_top: bool = False) -> str:
-        """Highlight compact defrag values with metric-specific thresholds"""
-        try:
-            # Convert value to float for processing
-            if isinstance(value, str):
-                try:
-                    # Try to extract numeric value from formatted string
-                    import re
-                    numbers = re.findall(r'[\d.]+', value)
-                    if numbers:
-                        numeric_value = float(numbers[0])
-                    else:
-                        # If no numbers found, return the original string
-                        return str(value)
-                except (ValueError, TypeError):
-                    return str(value)
-            else:
-                numeric_value = float(value)
-            
-            thresholds = self._get_compact_defrag_thresholds(metric_type)
-            
-            # Format the value first
-            formatted_value = self.format_compact_defrag_value(numeric_value, unit)
-            
-            if is_top:
-                return f'<span class="text-primary font-weight-bold bg-light px-1">🏆 {formatted_value}</span>'
-            
-            if thresholds and isinstance(numeric_value, (int, float)):
-                critical = thresholds.get('critical', float('inf'))
-                warning = thresholds.get('warning', float('inf'))
-                
-                if numeric_value >= critical:
-                    return f'<span class="text-danger font-weight-bold">⚠️ {formatted_value}</span>'
-                elif numeric_value >= warning:
-                    return f'<span class="text-warning font-weight-bold">{formatted_value}</span>'
-                else:
-                    return f'<span class="text-success">{formatted_value}</span>'
-            else:
-                return formatted_value
-                
-        except (ValueError, TypeError):
-            return str(value)
-    
-    def _get_compact_defrag_thresholds(self, metric_type: str) -> Dict[str, float]:
-        """Get thresholds for compact defrag metrics"""
-        thresholds_map = {
-            'compaction_duration': {'warning': 50, 'critical': 100},  # milliseconds
-            'defrag_duration': {'warning': 1, 'critical': 5},         # seconds
-            'page_fault_rate': {'warning': 0.1, 'critical': 1.0},    # faults/s
-            'page_fault_total': {'warning': 20000, 'critical': 50000} # total faults
+        # Define table order and display names
+        table_configs = {
+            'compact_defrag_overview': 'Compact & Defrag Overview',
+            'compacted_keys': 'DB Compacted Keys',
+            'compaction_rate': 'DB Compaction Rate',
+            'compaction_duration': 'DB Compaction Duration',
+            'snapshot_duration': 'Snapshot Duration',
+            'defrag_rate': 'Defrag Rate',
+            'defrag_duration': 'Defrag Duration'
         }
         
-        for key, threshold in thresholds_map.items():
-            if key in metric_type.lower():
-                return threshold
+        try:
+            for table_key, display_name in table_configs.items():
+                if table_key in dataframes and not dataframes[table_key].empty:
+                    html_tables[table_key] = self.create_html_table(
+                        dataframes[table_key], 
+                        display_name
+                    )
         
-        return {}
+        except Exception as e:
+            logger.error(f"Failed to generate HTML tables for compact defrag: {e}")
+        
+        return html_tables

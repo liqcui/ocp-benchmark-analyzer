@@ -1,6 +1,6 @@
 """
 Extract, Load, Transform module for OpenShift Cluster Information
-Handles cluster info data from ocp_cluster_info.py
+Handles cluster info data from ovnk_benchmark_openshift_cluster_info.py
 """
 
 import logging
@@ -17,7 +17,7 @@ class ClusterInfoELT(EltUtility):
         super().__init__()
         
     def extract_cluster_info(self, data: Dict[str, Any]) -> Dict[str, Any]:
-            """Extract cluster information from ocp_cluster_info.py output"""
+            """Extract cluster information from ovnk_benchmark_openshift_cluster_info.py output"""
             structured = {
                 'cluster_overview': [],
                 'resource_summary': [],

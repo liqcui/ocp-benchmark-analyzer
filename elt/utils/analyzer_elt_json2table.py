@@ -90,7 +90,9 @@ class GenericELT(utilityELT):
         """Lazy initialization of metric handlers"""
         if self.registry._initialized:
             return
-        
+
+        self.registry._initialized = True  
+
         # Import and register all metric handlers
         try:
             from ..ocp.analyzer_elt_cluster_info import clusterInfoELT
@@ -101,7 +103,37 @@ class GenericELT(utilityELT):
             )
         except ImportError as e:
             logger.warning(f"Could not import cluster_info handler: {e}")
-        
+
+        try:
+            from ..etcd.analyzer_elt_cluster_status import etcdClusterStatusELT
+            register_metric_handler(
+                'etcd_cluster_status',
+                etcdClusterStatusELT,
+                self._is_etcd_cluster_status
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import etcd_cluster_status handler: {e}")
+
+        try:
+            from ..node.analyzer_elt_node_usage import nodeUsageELT
+            register_metric_handler(
+                'node_usage',
+                nodeUsageELT,
+                self._is_node_usage
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import disk_io handler: {e}")
+
+        try:
+            from ..disk.analyzer_elt_disk_io import diskIOELT
+            register_metric_handler(
+                'disk_io',
+                diskIOELT,
+                self._is_disk_io
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import disk_io handler: {e}")
+
         # Register network_l1 handler
         try:
             from ..net.analyzer_elt_network_l1 import networkL1ELT
@@ -200,17 +232,6 @@ class GenericELT(utilityELT):
         except ImportError as e:
             logger.warning(f"Could not import network_io handler: {e}")
 
-        try:
-            from ..etcd.analyzer_elt_cluster_status import etcdClusterStatusELT
-            register_metric_handler(
-                'etcd_cluster_status',
-                etcdClusterStatusELT,
-                self._is_etcd_cluster_status
-            )
-        except ImportError as e:
-            logger.warning(f"Could not import etcd_cluster_status handler: {e}")
-
-        self.registry._initialized = True
 
         try:
             from ..etcd.analyzer_elt_backend_commit import backendCommitELT
@@ -221,6 +242,36 @@ class GenericELT(utilityELT):
             )
         except ImportError as e:
             logger.warning(f"Could not import backend_commit handler: {e}")
+
+        try:
+            from ..etcd.analyzer_elt_compact_defrag import compactDefragELT
+            register_metric_handler(
+                'compact_defrag',
+                compactDefragELT,
+                self._is_compact_defrag
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import compact_defrag handler: {e}")
+
+        try:
+            from ..etcd.analyzer_elt_wal_fsync import diskWalFsyncELT
+            register_metric_handler(
+                'disk_wal_fsync',
+                diskWalFsyncELT,
+                self._is_disk_wal_fsync
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import disk_wal_fsync handler: {e}")
+
+        try:
+            from ..etcd.analyzer_elt_general_info import generalInfoELT
+            register_metric_handler(
+                'general_info',
+                generalInfoELT,
+                self._is_general_info
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import general_info handler: {e}")
 
     # ============================================================================
     # DATA TYPE IDENTIFICATION
@@ -264,6 +315,30 @@ class GenericELT(utilityELT):
         
         return False
 
+    @staticmethod
+    def _is_disk_io(data: Dict[str, Any]) -> bool:
+        """Identify disk I/O data"""
+        if 'category' in data and data.get('category') == 'disk_io':
+            return True
+        
+        # Check nested structure
+        if 'data' in data and isinstance(data.get('data'), dict):
+            inner = data['data']
+            if 'category' in inner and inner.get('category') == 'disk_io':
+                return True
+            # Check for metrics with disk_io prefix
+            metrics = inner.get('metrics', {})
+            if isinstance(metrics, dict):
+                if any('disk_io' in k for k in metrics.keys()):
+                    return True
+        
+        # Direct metrics check
+        if 'metrics' in data and isinstance(data.get('metrics'), dict):
+            if any('disk_io' in k for k in data['metrics'].keys()):
+                return True
+        
+        return False
+        
     # Add this static method to GenericELT class after _is_cluster_info
     @staticmethod
     def _is_network_l1(data: Dict[str, Any]) -> bool:
@@ -431,6 +506,76 @@ class GenericELT(utilityELT):
         
         return False
 
+    @staticmethod
+    def _is_disk_wal_fsync(data: Dict[str, Any]) -> bool:
+        """Identify disk WAL fsync data"""
+        if 'category' in data and data.get('category') == 'disk_wal_fsync':
+            return True
+        
+        if 'data' in data and isinstance(data.get('data'), dict):
+            inner = data['data']
+            if 'category' in inner and inner.get('category') == 'disk_wal_fsync':
+                return True
+            metrics = inner.get('metrics', {})
+            if isinstance(metrics, dict):
+                if any('disk_wal_fsync' in k for k in metrics.keys()):
+                    return True
+        
+        if 'metrics' in data and isinstance(data.get('metrics'), dict):
+            if any('disk_wal_fsync' in k for k in data['metrics'].keys()):
+                return True
+        
+        return False
+
+    @staticmethod
+    def _is_general_info(data: Dict[str, Any]) -> bool:
+        """Identify general info data"""
+        if 'category' in data and data.get('category') == 'general_info':
+            return True
+        
+        # Check nested structure
+        if 'data' in data and isinstance(data.get('data'), dict):
+            inner = data['data']
+            if 'category' in inner and inner.get('category') == 'general_info':
+                return True
+            # Check for pod_metrics
+            if 'pod_metrics' in inner:
+                return True
+        
+        # Direct pod_metrics check
+        if 'pod_metrics' in data:
+            return True
+        
+        return False
+
+    @staticmethod
+    def _is_node_usage(data: Dict[str, Any]) -> bool:
+        """Identify node usage data"""
+        if 'category' in data and data.get('category') == 'node_usage':
+            return True
+        
+        # Check nested structure
+        if 'data' in data and isinstance(data.get('data'), dict):
+            inner = data['data']
+            if 'category' in inner and inner.get('category') == 'node_usage':
+                return True
+            # Check for metrics with node usage indicators
+            metrics = inner.get('metrics', {})
+            if isinstance(metrics, dict):
+                if any(k in metrics for k in ['cpu_usage', 'memory_used', 'cgroup_cpu_usage', 'cgroup_rss_usage']):
+                    return True
+        
+        # Direct metrics check
+        if 'metrics' in data and isinstance(data.get('metrics'), dict):
+            if any(k in data['metrics'] for k in ['cpu_usage', 'memory_used', 'cgroup_cpu_usage', 'cgroup_rss_usage']):
+                return True
+        
+        # Check for node_group in query_params
+        if 'query_params' in data and isinstance(data.get('query_params'), dict):
+            if 'node_group' in data['query_params']:
+                return True
+        
+        return False
 
     # ============================================================================
     # MAIN PROCESSING PIPELINE
@@ -479,6 +624,15 @@ class GenericELT(utilityELT):
             if data_type == 'cluster_info':
                 structured_data = handler.extract_cluster_info(actual_data) if hasattr(handler, 'extract_cluster_info') else {}
                 summary_method = 'summarize_cluster_info'
+            elif data_type == 'etcd_cluster_status':  # NEW
+                structured_data = handler.extract_cluster_status(actual_data) if hasattr(handler, 'extract_cluster_status') else {}
+                summary_method = 'summarize_cluster_status'
+            elif data_type == 'node_usage':
+                structured_data = handler.extract_node_usage(actual_data) if hasattr(handler, 'extract_node_usage') else {}
+                summary_method = 'summarize_node_usage'                  
+            elif data_type == 'disk_io':
+                structured_data = handler.extract_disk_io(actual_data) if hasattr(handler, 'extract_disk_io') else {}
+                summary_method = 'summarize_disk_io'                
             elif data_type == 'network_l1':
                 structured_data = handler.extract_network_l1(actual_data) if hasattr(handler, 'extract_network_l1') else {}
                 summary_method = 'summarize_network_l1'
@@ -505,13 +659,19 @@ class GenericELT(utilityELT):
                 summary_method = 'summarize_network_netstat_udp'
             elif data_type == 'network_io':
                 structured_data = handler.extract_network_io(actual_data) if hasattr(handler, 'extract_network_io') else {}
-                summary_method = 'summarize_network_io'                
-            elif data_type == 'etcd_cluster_status':  # NEW
-                structured_data = handler.extract_cluster_status(actual_data) if hasattr(handler, 'extract_cluster_status') else {}
-                summary_method = 'summarize_cluster_status'                
+                summary_method = 'summarize_network_io'                              
             elif data_type == 'backend_commit':
                 structured_data = handler.extract_backend_commit(actual_data) if hasattr(handler, 'extract_backend_commit') else {}
                 summary_method = 'summarize_backend_commit'
+            elif data_type == 'compact_defrag':
+                structured_data = handler.extract_compact_defrag(actual_data) if hasattr(handler, 'extract_compact_defrag') else {}
+                summary_method = 'summarize_compact_defrag' 
+            elif data_type == 'disk_wal_fsync':
+                structured_data = handler.extract_wal_fsync(actual_data) if hasattr(handler, 'extract_wal_fsync') else {}
+                summary_method = 'summarize_wal_fsync'
+            elif data_type == 'general_info':
+                structured_data = handler.extract_general_info(actual_data) if hasattr(handler, 'extract_general_info') else {}
+                summary_method = 'summarize_general_info'                                             
             else:
                 # Generic fallback
                 structured_data = handler.extract_cluster_info(actual_data) if hasattr(handler, 'extract_cluster_info') else {}
@@ -551,6 +711,18 @@ class GenericELT(utilityELT):
 
         # Unwrap for etcd_cluster_status - NEW
         if data_type == 'etcd_cluster_status':
+            if 'data' in data and isinstance(data.get('data'), dict):
+                return data['data']
+            if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
+                return data['result']['data']
+
+        if data_type == 'node_usage':
+            if 'data' in data and isinstance(data.get('data'), dict):
+                return data['data']
+            if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
+                return data['result']['data']
+
+        if data_type == 'disk_io':
             if 'data' in data and isinstance(data.get('data'), dict):
                 return data['data']
             if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
@@ -625,6 +797,24 @@ class GenericELT(utilityELT):
                 return data['data']
             if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
                 return data['result']['data']
+
+        if data_type == 'compact_defrag':
+            if 'data' in data and isinstance(data.get('data'), dict):
+                return data['data']
+            if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
+                return data['result']['data']
+
+        if data_type == 'disk_wal_fsync':
+            if 'data' in data and isinstance(data.get('data'), dict):
+                return data['data']
+            if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
+                return data['result']['data']
+
+        if data_type == 'general_info':
+            if 'data' in data and isinstance(data.get('data'), dict):
+                return data['data']
+            if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
+                return data['result']['data']                
 
     def _process_generic(self, data: Dict[str, Any], data_type: str) -> Dict[str, Any]:
         """Generic processing for unknown data types"""

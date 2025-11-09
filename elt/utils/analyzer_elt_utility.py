@@ -887,4 +887,60 @@ class utilityELT:
             else:
                 return formatted
         except (ValueError, TypeError):
-            return str(value)              
+            return str(value)
+
+    def highlight_general_info_values(self, value: float, metric_name: str, 
+                                    unit: str = "", is_top: bool = False) -> str:
+        """
+        Highlight general info metric values with color coding and top 1 indicator
+        
+        Args:
+            value: The numeric value to format
+            metric_name: Name of the metric for threshold lookup
+            unit: Unit to append
+            is_top: True if this is the top 1 value
+            
+        Returns:
+            HTML formatted string with appropriate highlighting
+        """
+        try:
+            value = float(value) if value is not None else 0
+        except (ValueError, TypeError):
+            return str(value) + unit
+        
+        # Define thresholds for different metric types
+        thresholds = {
+            'cpu_usage': {'critical': 80.0, 'warning': 60.0},
+            'memory_usage': {'critical': 85.0, 'warning': 70.0},
+            'db_space_used_percent': {'critical': 80.0, 'warning': 60.0},
+            'db_physical_size': {'critical': 8000.0, 'warning': 6000.0},  # MB
+            'db_logical_size': {'critical': 4000.0, 'warning': 3000.0},  # MB
+            'proposal_failure_rate': {'critical': 0.1, 'warning': 0.01},
+            'proposal_pending_total': {'critical': 10.0, 'warning': 5.0},
+            'leader_changes_rate': {'critical': 1.0, 'warning': 0.1},
+            'slow_applies': {'critical': 1.0, 'warning': 0.1},
+            'slow_read_indexes': {'critical': 1.0, 'warning': 0.1},
+            'cpu_io_utilization_iowait': {'critical': 10.0, 'warning': 5.0},
+            'vmstat_pgmajfault_rate': {'critical': 1.0, 'warning': 0.5}
+        }
+        
+        metric_thresholds = thresholds.get(metric_name, {'critical': 80.0, 'warning': 60.0})
+        
+        # Format value with unit
+        formatted_value = self.format_value_with_unit(value, unit)
+        
+        # Top 1 highlighting
+        if is_top and value > 0:
+            return f'<span class="text-primary font-weight-bold bg-light px-1">🏆 {formatted_value}</span>'
+        
+        # Critical highlighting
+        elif value >= metric_thresholds['critical']:
+            return f'<span class="text-danger font-weight-bold">⚠️ {formatted_value}</span>'
+        
+        # Warning highlighting
+        elif value >= metric_thresholds['warning']:
+            return f'<span class="text-warning font-weight-bold">{formatted_value}</span>'
+        
+        # Normal value
+        else:
+            return formatted_value                        

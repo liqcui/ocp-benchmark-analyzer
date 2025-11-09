@@ -60,7 +60,7 @@ try:
     from tools.etcd.etcd_disk_compact_defrag import CompactDefragCollector
     from tools.etcd.etcd_disk_wal_fsync import DiskWALFsyncCollector
     from tools.etcd.etcd_disk_backend_commit import DiskBackendCommitCollector
-    from tools.etcd.etcd_network_io import NetworkIOCollector
+    from tools.net.network_io import NetworkIOCollector
     from tools.disk.disk_io import DiskIOCollector
     from tools.ocp.cluster_info import ClusterInfoCollector
     from tools.node.node_usage import nodeUsageCollector
@@ -285,7 +285,10 @@ async def initialize_collectors():
         
         # Network IO Collector
         logger.info("Initializing NetworkIOCollector...")
-        network_collector = NetworkIOCollector(auth_manager, metrics_file_path=metrics_etcd_file)
+        network_collector = NetworkIOCollector(
+            prometheus_url=auth_manager.prometheus_url,
+            token=getattr(auth_manager, 'prometheus_token', None)
+        )
         
         # Disk IO Collector - uses metrics-disk.yml
         logger.info("Initializing DiskIOCollector...")
@@ -470,7 +473,7 @@ async def get_etcd_node_usage(duration: str = "1h") -> ETCDNodeUsageResponse:
                     duration=duration
                 )
         
-        result = await node_usage_collector.collect_all_metrics(duration)
+        result = await node_usage_collector.collect_all_metrics(node_group='master', duration=duration)
         
         return ETCDNodeUsageResponse(
             status=result.get('status', 'unknown'),
@@ -778,7 +781,10 @@ async def get_etcd_network_io(duration: str = "1h") -> ETCDNetworkIOResponse:
                         duration=duration
                     )
             try:
-                network_collector = NetworkIOCollector(auth_manager)
+                network_collector = NetworkIOCollector(
+                    prometheus_url=auth_manager.prometheus_url,
+                    token=getattr(auth_manager, 'prometheus_token', None)
+                )
             except Exception as e:
                 return ETCDNetworkIOResponse(
                     status="error",
@@ -1189,7 +1195,7 @@ async def generate_etcd_performance_report(duration: str = "1h", input: Performa
                     'verify_ssl': False,
                 }
                 node_usage_collector = nodeUsageCollector(auth_manager, prometheus_config_local)
-            node_usage_result = await node_usage_collector.collect_all_metrics(eff_duration)
+            node_usage_result = await node_usage_collector.collect_all_metrics(node_group='master', duration=eff_duration)
             node_usage_wrapped = {
                 'status': node_usage_result.get('status', 'unknown'),
                 'data': node_usage_result,

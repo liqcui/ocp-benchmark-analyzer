@@ -17,11 +17,11 @@ from .ovnk_benchmark_elt_cluster_info import ClusterInfoELT
 from .ovnk_benchmark_elt_nodes_usage import NodesUsageELT
 from .ovnk_benchmark_elt_pods_usage import PodsUsageELT
 from .ovnk_benchmark_elt_utility import EltUtility
-from .ovnk_benchmark_elt_cluster_stat import ClusterStatELT
 from .ovnk_benchmark_elt_ovs import OvsELT
 from .ovnk_benchmark_elt_latency import latencyELT
 from .ovnk_benchmark_elt_kubeapi import kubeAPIELT
 from .ovnk_benchmark_elt_deepdrive import deepDriveELT
+from .ovnk_benchmark_elt_network_io import NetworkIOELT
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,9 @@ class PerformanceDataELT(EltUtility):
         self.ovs_elt = OvsELT()
         self.kube_api_elt = kubeAPIELT()
         self.latencyelt = latencyELT() 
-        self.deepdrive_elt = deepDriveELT()  
+        self.deepdrive_elt = deepDriveELT()
+        self.network_io_elt = NetworkIOELT()
+        self.logger=logging.getLogger(__name__)
 
     def extract_json_data(self, mcp_results: Union[Dict[str, Any], str]) -> Dict[str, Any]:
         """Extract relevant data from MCP tool results"""
@@ -80,6 +82,8 @@ class PerformanceDataELT(EltUtility):
                 extracted['structured_data'] = self.kube_api_elt.extract_kube_api_data(mcp_results)   
             elif extracted['data_type'] == 'ovn_deep_drive':
                 extracted['structured_data'] = self.deepdrive_elt.extract_deepdrive_data(mcp_results)                             
+            elif extracted['data_type'] == 'network_io':
+                extracted['structured_data'] = self.network_io_elt.extract_network_io(mcp_results)
             else:
                 extracted['structured_data'] = self._extract_generic_data(mcp_results)
             
@@ -162,9 +166,23 @@ class PerformanceDataELT(EltUtility):
         # Check for cluster info
         if 'cluster_name' in data and 'cluster_version' in data and 'master_nodes' in data:
             return 'cluster_info'
-        
+
+        if ('category' in data and data.get('category') == 'network_io' and
+            'metrics' in data and 'summary' in data and 
+            'collection_metadata' in data):
+            return 'network_io'
+
         # Check for node usage data
-        if 'groups' in data and 'metadata' in data and 'top_usage' in data:
+        # Support both legacy structure (groups/metadata/top_usage) and new structure
+        # with collection timestamp/time range/node_groups_summary and metrics map
+        if (
+            (
+                isinstance(data.get('metrics'), dict)
+                and any(k in data['metrics'] for k in ['cpu_usage', 'cgroup_cpu', 'memory_used', 'cache_buffer', 'cgroup_rss'])
+                and any(k in data for k in ['collection_timestamp_utc', 'time_range', 'node_groups_summary'])
+            )
+            or ('groups' in data and 'metadata' in data and 'top_usage' in data)
+        ):
             return 'node_usage'
 
         # Legacy checks
@@ -184,52 +202,34 @@ class PerformanceDataELT(EltUtility):
             return 'generic'
     
     def _extract_generic_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Extract generic data with smart column limiting"""
+        """Extract generic data for unknown types.
+        Keep nested values intact so HTML renderer can expand them instead of placeholder strings.
+        """
         structured = {'key_value_pairs': []}
         
-        def extract_important_fields(d: Dict[str, Any], max_fields: int = 20) -> List[Tuple[str, Any]]:
-            """Extract most important fields from a dictionary"""
-            fields = []
-            
-            # Priority fields (always include if present)
-            priority_keys = [
-                'name', 'status', 'version', 'timestamp', 'count', 'total',
-                'health', 'error', 'message', 'value', 'metric', 'result'
-            ]
-            
-            # Add priority fields first
-            for key in priority_keys:
-                if key in d:
-                    fields.append((key, d[key]))
-            
-            # Add remaining fields up to limit
-            remaining_keys = [k for k in d.keys() if k not in priority_keys]
-            for key in remaining_keys:
-                if len(fields) < max_fields:
-                    fields.append((key, d[key]))
-                else:
+        def extract_fields(d: Dict[str, Any], max_fields: int = 50) -> List[Tuple[str, Any]]:
+            fields: List[Tuple[str, Any]] = []
+            preferred = ['collection_timestamp_utc', 'time_range', 'node_groups_summary', 'metrics', 'summary', 'status']
+            for k in preferred:
+                if k in d:
+                    fields.append((k, d[k]))
+            for k, v in d.items():
+                if k not in [f[0] for f in fields]:
+                    fields.append((k, v))
+                if len(fields) >= max_fields:
                     break
-            
             return fields
-        
-        important_fields = extract_important_fields(data)
-        
-        for key, value in important_fields:
-            # Format value for display
+
+        for key, value in extract_fields(data):
             if isinstance(value, (dict, list)):
-                if isinstance(value, dict):
-                    display_value = f"Dict({len(value)} keys)"
-                else:
-                    display_value = f"List({len(value)} items)"
+                final_value = value
             else:
-                value_str = str(value)
-                display_value = value_str[:100] + '...' if len(value_str) > 100 else value_str
-            
+                s = str(value)
+                final_value = s if len(s) <= 500 else s[:500] + '...'
             structured['key_value_pairs'].append({
                 'Property': key.replace('_', ' ').title(),
-                'Value': display_value
+                'Value': final_value
             })
-        
         return structured
        
     def generate_brief_summary(self, structured_data: Dict[str, Any], data_type: str) -> str:
@@ -251,7 +251,9 @@ class PerformanceDataELT(EltUtility):
             elif data_type == 'kube_api_metrics':
                 return self.kube_api_elt.summarize_kube_api_data(structured_data)
             elif data_type == 'ovn_deep_drive':
-                return self.deepdrive_elt.summarize_deepdrive_data(structured_data)                
+                return self.deepdrive_elt.summarize_deepdrive_data(structured_data)  
+            elif data_type == 'network_io':
+                return self.network_io_elt.summarize_network_io(structured_data)
             else:
                 return self._summarize_generic(structured_data)
         
@@ -289,7 +291,9 @@ class PerformanceDataELT(EltUtility):
             elif data_type == 'kube_api_metrics':
                 return self.kube_api_elt.transform_to_dataframes(structured_data)
             elif data_type == 'ovn_deep_drive':
-                return self.deepdrive_elt.transform_to_dataframes(structured_data)                                                          
+                return self.deepdrive_elt.transform_to_dataframes(structured_data)
+            elif data_type == 'network_io':
+                return self.network_io_elt.transform_to_dataframes(structured_data)
             else:
                 # Default transformation for other data types
                 dataframes = {}
@@ -324,7 +328,9 @@ class PerformanceDataELT(EltUtility):
             elif data_type == 'kube_api_metrics':
                 return self.kube_api_elt.generate_html_tables(dataframes)   
             elif data_type == 'ovn_deep_drive':
-                return self.deepdrive_elt.generate_html_tables(dataframes)                                                       
+                return self.deepdrive_elt.generate_html_tables(dataframes) 
+            elif data_type == 'network_io':
+                return self.network_io_elt.generate_html_tables(dataframes)                                                                      
             else:
                 # Default HTML table generation
                 html_tables = {}
@@ -348,7 +354,7 @@ def extract_and_transform_mcp_results(mcp_results: Dict[str, Any]) -> Dict[str, 
         
         if 'error' in extracted:
             return extracted
-        
+    
         # Create DataFrames using specialized modules
         dataframes = elt.transform_to_dataframes(extracted['structured_data'], extracted['data_type'])
         
@@ -370,39 +376,6 @@ def extract_and_transform_mcp_results(mcp_results: Dict[str, Any]) -> Dict[str, 
     except Exception as e:
         logger.error(f"Failed to extract and transform MCP results: {e}")
         return {'error': str(e)}
-
-
-# JSON to HTML format functions (main entry points)
-def json_to_html_table(json_data: Union[Dict[str, Any], str], compact: bool = True) -> str:
-    """Convert JSON data to HTML table format"""
-    result = convert_json_to_tables(json_data, "html", compact)
-    
-    if 'error' in result:
-        return f"<div class='alert alert-danger'>Error: {result['error']}</div>"
-    
-    html_tables = result.get('html', {})
-    if not html_tables:
-        return "<div class='alert alert-warning'>No tables generated</div>"
-    
-    # Generate organized output
-    output_parts = []
-    
-    # Add data type info
-    data_type = result.get('metadata', {}).get('data_type', 'unknown')
-    output_parts.append(f"<div class='mb-3'><span class='badge badge-info'>{data_type.replace('_', ' ').title()}</span></div>")
-    
-    # Add summary if available
-    if result.get('summary'):
-        output_parts.append(f"<div class='alert alert-light'>{result['summary']}</div>")
-    
-    # Add tables
-    for table_name, html_table in html_tables.items():
-        table_title = table_name.replace('_', ' ').title()
-        output_parts.append(f"<h5 class='mt-3'>{table_title}</h5>")
-        output_parts.append(html_table)
-    
-    return ' '.join(output_parts)
-
 
 def convert_json_to_tables(json_data: Union[Dict[str, Any], str], 
                           table_format: str = "both",
@@ -479,14 +452,13 @@ def convert_json_to_tables(json_data: Union[Dict[str, Any], str],
             result['tabular'] = tabular_tables
         
         return result
-        
+            
     except Exception as e:
         logger.error(f"Error converting JSON to tables: {e}")
         return {
             'error': str(e),
             'metadata': {'conversion_failed': True}
         }
-
 
 # Optimized latencyELT convenience functions
 async def latencyelt_convert_to_html_tables(latency_data: Dict[str, Any]) -> str:
@@ -548,7 +520,305 @@ async def latencyelt_get_all_metrics_top5_data(prometheus_client, time: str = No
         logger.error(f"Failed to get all metrics top5 data: {e}")
         return {'error': str(e)}
 
+def json_to_html_table(json_data: Union[Dict[str, Any], str], compact: bool = True, title: Optional[str] = None) -> str:
+    """Convert JSON data to HTML table format with proper styling"""
+    try:
+        # Parse JSON string if needed
+        if isinstance(json_data, str):
+            try:
+                json_data = json.loads(json_data)
+            except json.JSONDecodeError as e:
+                return f"<div class='alert alert-danger'>Invalid JSON: {str(e)}</div>"
+        
+        if not isinstance(json_data, dict):
+            return "<div class='alert alert-warning'>Input must be a dictionary or JSON object</div>"
 
+        # Try to use specialized ELT processor first
+        result = convert_json_to_tables(json_data, "html", compact)
+        
+        if 'error' in result:
+            # Fallback to generic processing
+            logger.warning(f"Conversion error: {result['error']}, using generic processing")
+            return _json_to_html_table_generic(json_data, title)
+        
+        html_tables = result.get('html', {})
+        if not html_tables:
+            return "<div class='alert alert-warning'>No tables generated</div>"
+        
+        # Generate organized output with metrics highlighting
+        output_parts = []
+
+        data_type = result.get('metadata', {}).get('data_type', 'unknown')
+        
+        # Add title if provided
+        if title:
+            output_parts.append(f"<h4 class='mt-3'>{title}</h4>")
+        
+        # Add data type badge
+        type_display = data_type.replace('_', ' ').title()
+        if data_type == 'node_usage':
+            type_display = 'Node Usage Metrics'
+        elif data_type == 'pod_usage':
+            type_display = 'Pod Usage Metrics'
+        elif data_type == 'cluster_info':
+            type_display = 'Cluster Information'
+        elif data_type == 'cluster_status':
+            type_display = 'Cluster Status Analysis'
+        elif data_type == 'ovs_metrics':
+            type_display = 'OVS Performance Metrics'
+        elif data_type in ['latencyelt_metrics', 'ovn_latency_metrics']:
+            type_display = 'OVN Latency Analysis'
+        elif data_type == 'kube_api_metrics':
+            type_display = 'Kubernetes API Metrics'
+        elif data_type == 'ovn_deep_drive':
+            type_display = 'OVN Deep Drive Analysis'
+            
+        output_parts.append(
+            f"<div class='mb-3'><span class='badge badge-info' style='font-size: 1.0rem; font-weight: 600'>{type_display}</span></div>"
+        )
+
+        # Add summary if available
+        if result.get('summary'):
+            summary_val = result['summary']
+            # Get utility instance for Unicode decoding
+            util = EltUtility()
+            
+            # If summary is HTML, pass through; otherwise format
+            if isinstance(summary_val, str) and summary_val.strip().startswith('<'):
+                try:
+                    decoded_summary = util.decode_unicode_escapes(summary_val)
+                except Exception:
+                    decoded_summary = summary_val
+                # Normalize bullet symbols to HTML entity to avoid mojibake in some renderers
+                decoded_summary = decoded_summary.replace('•', '&bull;')
+                output_parts.append(f"<div class='alert alert-light'>{decoded_summary}</div>")
+            else:
+                # Format summary text
+                try:
+                    summary_text = util.decode_unicode_escapes(str(summary_val))
+                except Exception:
+                    summary_text = str(summary_val)
+
+                def _escape_html(s: str) -> str:
+                    return s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+                # Special formatting for performance summaries
+                performance_keywords = ['Performance', 'Analysis', 'Metrics', 'Usage', 'Summary']
+                if any(keyword in summary_text for keyword in performance_keywords) or '•' in summary_text or '\n' in summary_text:
+                    parts = [p.strip() for p in summary_text.split('\n') if p.strip()]
+                    
+                    if parts:
+                        first_line = _escape_html(parts[0])
+                        # Bold performance analysis titles
+                        for keyword in performance_keywords:
+                            if keyword in first_line:
+                                first_line = first_line.replace(keyword, f'<strong>{keyword}</strong>')
+                        
+                        remaining_parts = [_escape_html(p) for p in parts[1:] if p]
+                        formatted_summary = first_line
+                        if remaining_parts:
+                            formatted_summary += '<br>' + '<br>'.join(remaining_parts)
+                        # Normalize bullet symbols
+                        formatted_summary = formatted_summary.replace('•', '&bull;')
+                        output_parts.append(f"<div class='alert alert-light'>{formatted_summary}</div>")
+                    else:
+                        safe_summary = _escape_html(summary_text)
+                        safe_summary = safe_summary.replace('•', '&bull;')
+                        output_parts.append(f"<div class='alert alert-light'>{safe_summary}</div>")
+                else:
+                    safe_summary = _escape_html(summary_text)
+                    safe_summary = safe_summary.replace('•', '&bull;')
+                    output_parts.append(f"<div class='alert alert-light'>{safe_summary}</div>")
+        
+        # Add tables with priority ordering based on data type
+        table_priority = []
+        
+        if data_type == 'node_usage':
+            table_priority = [
+                'collection_info',
+                'cpu_usage_controlplane', 'cpu_usage_infra', 'cpu_usage_worker', 'cpu_usage_workload',
+                'cgroup_cpu_controlplane', 'cgroup_cpu_infra', 'cgroup_cpu_worker', 'cgroup_cpu_workload',
+                'memory_used_controlplane', 'memory_used_infra', 'memory_used_worker', 'memory_used_workload',
+                'cache_buffer_controlplane', 'cache_buffer_infra', 'cache_buffer_worker', 'cache_buffer_workload',
+                'cgroup_rss_controlplane', 'cgroup_rss_infra', 'cgroup_rss_worker', 'cgroup_rss_workload'
+            ]
+        elif data_type == 'pod_usage':
+            table_priority = [
+                'collection_info', 'top_cpu_usage', 'top_memory_usage',
+                'cpu_usage_by_namespace', 'memory_usage_by_namespace'
+            ]
+        elif data_type == 'cluster_info':
+            table_priority = [
+                'cluster_overview', 'node_summary', 'master_nodes', 'worker_nodes'
+            ]
+        elif data_type == 'cluster_status':
+            table_priority = [
+                'cluster_overview', 'node_status', 'operator_status', 'health_summary'
+            ]
+        elif data_type == 'ovs_metrics':
+            table_priority = [
+                'metrics_overview', 'cpu_usage', 'memory_usage', 'flow_metrics', 'connection_metrics'
+            ]
+        elif data_type in ['latencyelt_metrics', 'ovn_latency_metrics']:
+            table_priority = [
+                'latencyelt_collection_info', 'latencyelt_essential_summary',
+                'latencyelt_top_latencies_ranking', 'latencyelt_controller_sync_top20',
+                'latencyelt_all_metrics_top5', 'latencyelt_critical_findings'
+            ]
+        elif data_type == 'kube_api_metrics':
+            table_priority = [
+                'summary', 'readonly_latency', 'mutating_latency', 'basic_api'
+            ]
+        elif data_type == 'ovn_deep_drive':
+            table_priority = [
+                'overview', 'cpu_analysis', 'memory_analysis', 'ovs_analysis', 'performance_summary'
+            ]
+        else:
+            table_priority = []
+        
+        # Add priority tables first
+        added_tables = set()
+        for priority_table in table_priority:
+            if priority_table in html_tables:
+                table_title = priority_table.replace('_', ' ').title()
+                
+                # Special titles for different data types
+                if data_type == 'node_usage':
+                    if priority_table == 'collection_info':
+                        table_title = 'Collection Information'
+                    else:
+                        parts = priority_table.split('_')
+                        if len(parts) >= 2:
+                            metric = ' '.join(parts[:-1]).title()
+                            role = parts[-1].title()
+                            table_title = f'{metric} - {role} Nodes'
+                elif data_type == 'pod_usage':
+                    title_mapping = {
+                        'collection_info': 'Collection Information',
+                        'top_cpu_usage': 'Top CPU Usage (Pods)',
+                        'top_memory_usage': 'Top Memory Usage (Pods)',
+                        'cpu_usage_by_namespace': 'CPU Usage by Namespace',
+                        'memory_usage_by_namespace': 'Memory Usage by Namespace'
+                    }
+                    table_title = title_mapping.get(priority_table, table_title)
+                elif data_type in ['latencyelt_metrics', 'ovn_latency_metrics']:
+                    title_mapping = {
+                        'latencyelt_collection_info': 'Collection Information',
+                        'latencyelt_essential_summary': 'Essential Metrics Summary',
+                        'latencyelt_top_latencies_ranking': 'Top Latencies Ranking',
+                        'latencyelt_controller_sync_top20': 'Controller Sync Top 20 Details',
+                        'latencyelt_all_metrics_top5': 'All Metrics Top 5 Details',
+                        'latencyelt_critical_findings': 'Critical Findings'
+                    }
+                    table_title = title_mapping.get(priority_table, table_title)
+                
+                output_parts.append(f"<h5 class='mt-3'>{table_title}</h5>")
+                output_parts.append(html_tables[priority_table])
+                added_tables.add(priority_table)
+        
+        # Add remaining tables
+        for table_name, html_table in html_tables.items():
+            if table_name not in added_tables:
+                table_title = table_name.replace('_', ' ').title()
+                output_parts.append(f"<h5 class='mt-3'>{table_title}</h5>")
+                output_parts.append(html_table)
+        
+        # Join all parts into final HTML
+        final_html = ''.join(output_parts)
+        
+        # Decode any lingering unicode escapes in the final HTML
+        try:
+            util = EltUtility()
+            final_html = util.decode_unicode_escapes(final_html)
+        except Exception:
+            pass
+        
+        # Return as plain string (not JSON encoded)
+        return final_html
+        
+    except Exception as e:
+        logger.error(f"Error in json_to_html_table: {e}")
+        import traceback
+        traceback.print_exc()
+        return f"<div class='alert alert-danger'>Error generating HTML table: {str(e)}</div>"
+
+def _json_to_html_table_generic(data: Dict[str, Any], title: Optional[str] = None) -> str:
+    """Generic JSON to HTML table converter as fallback"""
+    try:
+        from html import escape
+        
+        def _render(value: Any) -> str:
+            if isinstance(value, dict):
+                rows = []
+                for k, v in value.items():
+                    rows.append(
+                        f"<tr><th style='white-space:nowrap;text-align:left;padding:4px 8px;background:#f7f7f7'>{escape(str(k))}</th>"
+                        f"<td style='padding:4px 8px'>{_render(v)}</td></tr>"
+                    )
+                return (
+                    "<table class='table table-sm table-bordered' style='width:100%;border-collapse:collapse'>"
+                    + "".join(rows)
+                    + "</table>"
+                )
+
+            if isinstance(value, list):
+                if not value:
+                    return "<i>empty</i>"
+                # List of dicts -> tabular with headers
+                if all(isinstance(item, dict) for item in value):
+                    # Collect headers from union of keys
+                    headers: List[str] = []
+                    seen = set()
+                    for item in value:
+                        for key in item.keys():
+                            if key not in seen:
+                                seen.add(key)
+                                headers.append(key)
+                    thead = "<thead><tr>" + "".join(
+                        f"<th style='text-align:left;padding:4px 8px;background:#f0f0f0'>{escape(str(h))}</th>" for h in headers
+                    ) + "</tr></thead>"
+                    body_rows = []
+                    for item in value:
+                        cells = []
+                        for h in headers:
+                            cells.append(
+                                f"<td style='padding:4px 8px;vertical-align:top'>{_render(item.get(h)) if h in item else ''}</td>"
+                            )
+                        body_rows.append("<tr>" + "".join(cells) + "</tr>")
+                    tbody = "<tbody>" + "".join(body_rows) + "</tbody>"
+                    return (
+                        "<table class='table table-sm table-striped table-bordered' style='width:100%;border-collapse:collapse'>"
+                        + thead + tbody + "</table>"
+                    )
+                # List of scalars -> single-column table
+                items = "".join(
+                    f"<tr><td style='padding:4px 8px'>{escape(str(i))}</td></tr>" for i in value
+                )
+                return (
+                    "<table class='table table-sm table-bordered' style='width:auto;border-collapse:collapse'>"
+                    + items + "</table>"
+                )
+
+            # Scalars
+            if value is None:
+                return "<i>null</i>"
+            if isinstance(value, (int, float)):
+                return escape(str(value))
+            return escape(str(value))
+
+        header = f"<h4 style='margin:8px 0'>{escape(title)}</h4>" if title else ""
+        return header + _render(data)
+    except Exception as e:
+        logger.error(f"_json_to_html_table_generic failed: {e}")
+        # Fallback: preformatted JSON-like dump
+        try:
+            import json
+            pretty = json.dumps(data, indent=2, default=str)
+        except Exception:
+            pretty = str(data)
+        from html import escape
+        return f"<pre>{escape(pretty)}</pre>"
+        
 # Export main functions for external use
 __all__ = [
     'PerformanceDataELT',
@@ -561,3 +831,6 @@ __all__ = [
     'latencyelt_get_controller_sync_top20_data', 
     'latencyelt_get_all_metrics_top5_data'    
 ]
+
+
+
