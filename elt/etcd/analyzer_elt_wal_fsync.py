@@ -93,8 +93,8 @@ class diskWalFsyncELT(utilityELT):
             role_nodes = []
             
             for pod, node in node_mapping.items():
-                # etcd runs on control plane nodes
-                if role == 'controlplane' and 'master' in node.lower():
+                # etcd runs on control plane nodes - check if pod name starts with 'etcd-'
+                if role == 'controlplane' and pod.startswith('etcd-'):
                     role_pods[pod] = pod_metrics.get(pod)
                     if node not in role_nodes:
                         role_nodes.append(node)
@@ -247,10 +247,11 @@ class diskWalFsyncELT(utilityELT):
                 if not stats:
                     continue
                 
-                avg_val = stats.get('avg_ops_per_sec', 0)
-                max_val = stats.get('max_ops_per_sec', 0)
-                min_val = stats.get('min_ops_per_sec', 0)
-                latest_val = stats.get('latest_ops_per_sec', 0)
+                # The actual data uses avg_rate_seconds, max_rate_seconds, etc.
+                avg_val = stats.get('avg_rate_seconds', 0) or stats.get('avg_ops_per_sec', 0)
+                max_val = stats.get('max_rate_seconds', 0) or stats.get('max_ops_per_sec', 0)
+                min_val = stats.get('min_rate_seconds', 0) or stats.get('min_ops_per_sec', 0)
+                latest_val = stats.get('latest_rate_seconds', 0) or stats.get('latest_ops_per_sec', 0)
                 
                 all_values.append(max_val)
                 
