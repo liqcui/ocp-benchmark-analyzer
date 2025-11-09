@@ -283,12 +283,17 @@ async def initialize_collectors():
         logger.info("Initializing DiskBackendCommitCollector...")
         backend_commit_collector = DiskBackendCommitCollector(auth_manager, metrics_file_path=metrics_etcd_file)
         
-        # Network IO Collector
+        # Network IO Collector - uses metrics-net.yml
         logger.info("Initializing NetworkIOCollector...")
+        metrics_net_file = os.path.join(PROJECT_ROOT, 'config', 'metrics-net.yml')
+        network_config = Config(metrics_file=metrics_net_file)
         network_collector = NetworkIOCollector(
             prometheus_url=auth_manager.prometheus_url,
-            token=getattr(auth_manager, 'prometheus_token', None)
+            token=getattr(auth_manager, 'prometheus_token', None),
+            config=network_config
         )
+        await network_collector.initialize()
+        logger.info("✅ NetworkIOCollector initialized")
         
         # Disk IO Collector - uses metrics-disk.yml
         logger.info("Initializing DiskIOCollector...")
@@ -766,10 +771,12 @@ async def get_etcd_network_io(duration: str = "1h") -> ETCDNetworkIOResponse:
         ETCDNetworkIOResponse: Network I/O performance metrics including container/peer/client network statistics, node utilization, error rates, and health assessment
     """
     try:
-        global auth_manager, network_collector
+        global auth_manager, network_collector, config, PROJECT_ROOT
         if not network_collector:
             # Lazy initialize if startup initialization didn't complete
             if auth_manager is None:
+                if config is None:
+                    config = Config()
                 auth_manager = OpenShiftAuth(config.kubeconfig_path if config else None)
                 try:
                     await auth_manager.initialize()
@@ -781,10 +788,14 @@ async def get_etcd_network_io(duration: str = "1h") -> ETCDNetworkIOResponse:
                         duration=duration
                     )
             try:
+                metrics_net_file = os.path.join(PROJECT_ROOT, 'config', 'metrics-net.yml')
+                network_config = Config(metrics_file=metrics_net_file)
                 network_collector = NetworkIOCollector(
                     prometheus_url=auth_manager.prometheus_url,
-                    token=getattr(auth_manager, 'prometheus_token', None)
+                    token=getattr(auth_manager, 'prometheus_token', None),
+                    config=network_config
                 )
+                await network_collector.initialize()
             except Exception as e:
                 return ETCDNetworkIOResponse(
                     status="error",
@@ -793,17 +804,27 @@ async def get_etcd_network_io(duration: str = "1h") -> ETCDNetworkIOResponse:
                     duration=duration
                 )
         
-        # Prefer collect_all_metrics; fall back to collect_metrics for compatibility
-        if hasattr(network_collector, "collect_all_metrics"):
-            result = await network_collector.collect_all_metrics(duration)
-        else:
-            result = await network_collector.collect_metrics(duration)
+        # Ensure collector is initialized
+        if not hasattr(network_collector, 'prometheus_client') or network_collector.prometheus_client is None:
+            await network_collector.initialize()
+        
+        # Use collect_all_metrics from the new module
+        result = await network_collector.collect_all_metrics(duration)
+        
+        # Derive status from summary (new module structure)
+        status = "success"
+        error = None
+        if result.get('summary'):
+            errors = result['summary'].get('errors', 0)
+            if errors > 0:
+                status = "error"
+                error = f"{errors} metric(s) failed to collect"
         
         return ETCDNetworkIOResponse(
-            status=result.get('status', 'unknown'),
+            status=status,
             data=result,
-            error=result.get('error'),
-            timestamp=(result.get('collection_time') or result.get('timestamp') or datetime.now(pytz.UTC).isoformat()),
+            error=error,
+            timestamp=result.get('timestamp', datetime.now(pytz.UTC).isoformat()),
             duration=duration
         )
         
