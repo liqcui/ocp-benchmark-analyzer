@@ -530,20 +530,33 @@ class GenericELT(utilityELT):
     @staticmethod
     def _is_general_info(data: Dict[str, Any]) -> bool:
         """Identify general info data"""
+        # Check top-level category
         if 'category' in data and data.get('category') == 'general_info':
             return True
         
-        # Check nested structure
+        # Check nested structure - prioritize checking inner data first
         if 'data' in data and isinstance(data.get('data'), dict):
             inner = data['data']
+            # Check category in nested data
             if 'category' in inner and inner.get('category') == 'general_info':
                 return True
-            # Check for pod_metrics
-            if 'pod_metrics' in inner:
-                return True
+            # Check for pod_metrics (strong indicator of general_info)
+            if 'pod_metrics' in inner and isinstance(inner.get('pod_metrics'), dict):
+                # Additional validation: check if pod_metrics contains expected structure
+                pod_metrics = inner['pod_metrics']
+                # Check for common general_info metric keys
+                if any(key in pod_metrics for key in [
+                    'etcd_pods_cpu_usage', 'etcd_pods_memory_usage', 
+                    'etcd_db_space_used_percent', 'proposal_failure_rate',
+                    'apiserver_storage_objects_max_top20'
+                ]):
+                    return True
+                # If pod_metrics exists and is not empty, it's likely general_info
+                if pod_metrics:
+                    return True
         
         # Direct pod_metrics check
-        if 'pod_metrics' in data:
+        if 'pod_metrics' in data and isinstance(data.get('pod_metrics'), dict):
             return True
         
         return False
@@ -783,8 +796,6 @@ class GenericELT(utilityELT):
                 return data['data']
             if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
                 return data['result']['data']
-        
-        return data
 
         if data_type == 'network_io':
             if 'data' in data and isinstance(data.get('data'), dict):
@@ -814,7 +825,9 @@ class GenericELT(utilityELT):
             if 'data' in data and isinstance(data.get('data'), dict):
                 return data['data']
             if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
-                return data['result']['data']                
+                return data['result']['data']
+        
+        return data                
 
     def _process_generic(self, data: Dict[str, Any], data_type: str) -> Dict[str, Any]:
         """Generic processing for unknown data types"""
