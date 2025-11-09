@@ -316,6 +316,56 @@ class GenericELT(utilityELT):
         return False
 
     @staticmethod
+    def _is_etcd_cluster_status(data: Dict[str, Any]) -> bool:
+        """Identify etcd cluster status data"""
+        if 'etcd_pod' in data and 'cluster_health' in data:
+            return True
+        
+        # Check nested structure
+        if 'data' in data and isinstance(data.get('data'), dict):
+            inner = data['data']
+            if 'etcd_pod' in inner and 'cluster_health' in inner:
+                return True
+            if 'endpoint_status' in inner and 'member_status' in inner:
+                return True
+        
+        # Check for cluster status indicators
+        if ('endpoint_status' in data and 'member_status' in data and 
+            'leader_info' in data):
+            return True
+        
+        return False
+
+    @staticmethod
+    def _is_node_usage(data: Dict[str, Any]) -> bool:
+        """Identify node usage data"""
+        if 'category' in data and data.get('category') == 'node_usage':
+            return True
+        
+        # Check nested structure
+        if 'data' in data and isinstance(data.get('data'), dict):
+            inner = data['data']
+            if 'category' in inner and inner.get('category') == 'node_usage':
+                return True
+            # Check for metrics with node usage indicators
+            metrics = inner.get('metrics', {})
+            if isinstance(metrics, dict):
+                if any(k in metrics for k in ['cpu_usage', 'memory_used', 'cgroup_cpu_usage', 'cgroup_rss_usage']):
+                    return True
+        
+        # Direct metrics check
+        if 'metrics' in data and isinstance(data.get('metrics'), dict):
+            if any(k in data['metrics'] for k in ['cpu_usage', 'memory_used', 'cgroup_cpu_usage', 'cgroup_rss_usage']):
+                return True
+        
+        # Check for node_group in query_params
+        if 'query_params' in data and isinstance(data.get('query_params'), dict):
+            if 'node_group' in data['query_params']:
+                return True
+        
+        return False
+
+    @staticmethod
     def _is_disk_io(data: Dict[str, Any]) -> bool:
         """Identify disk I/O data"""
         if 'category' in data and data.get('category') == 'disk_io':
@@ -455,27 +505,6 @@ class GenericELT(utilityELT):
         return False
 
     @staticmethod
-    def _is_etcd_cluster_status(data: Dict[str, Any]) -> bool:
-        """Identify etcd cluster status data"""
-        if 'etcd_pod' in data and 'cluster_health' in data:
-            return True
-        
-        # Check nested structure
-        if 'data' in data and isinstance(data.get('data'), dict):
-            inner = data['data']
-            if 'etcd_pod' in inner and 'cluster_health' in inner:
-                return True
-            if 'endpoint_status' in inner and 'member_status' in inner:
-                return True
-        
-        # Check for cluster status indicators
-        if ('endpoint_status' in data and 'member_status' in data and 
-            'leader_info' in data):
-            return True
-        
-        return False
-
-    @staticmethod
     def _is_backend_commit(data: Dict[str, Any]) -> bool:
         """Identify backend commit data"""
         if 'category' in data and data.get('category') == 'disk_backend_commit':
@@ -528,6 +557,37 @@ class GenericELT(utilityELT):
         return False
 
     @staticmethod
+    def _is_compact_defrag(data: Dict[str, Any]) -> bool:
+        """Identify compact defrag data"""
+        if 'category' in data and data.get('category') == 'compact_defrag':
+            return True
+        
+        # Check nested structure
+        if 'data' in data and isinstance(data.get('data'), dict):
+            inner = data['data']
+            if 'category' in inner and inner.get('category') == 'compact_defrag':
+                return True
+            # Check for metrics with compact_defrag indicators
+            metrics = inner.get('metrics') or inner.get('pods_metrics')
+            if isinstance(metrics, dict):
+                if any('compact_defrag' in k or 'compact' in k.lower() or 'defrag' in k.lower()
+                       for k in metrics.keys()):
+                    return True
+        
+        # Direct metrics check
+        if 'metrics' in data and isinstance(data.get('metrics'), dict):
+            if any('compact_defrag' in k or 'compact' in k.lower() or 'defrag' in k.lower()
+                   for k in data['metrics'].keys()):
+                return True
+        
+        if 'pods_metrics' in data and isinstance(data.get('pods_metrics'), dict):
+            if any('compact_defrag' in k or 'compact' in k.lower() or 'defrag' in k.lower()
+                   for k in data['pods_metrics'].keys()):
+                return True
+        
+        return False
+
+    @staticmethod
     def _is_general_info(data: Dict[str, Any]) -> bool:
         """Identify general info data"""
         # Check top-level category
@@ -561,34 +621,6 @@ class GenericELT(utilityELT):
         
         return False
 
-    @staticmethod
-    def _is_node_usage(data: Dict[str, Any]) -> bool:
-        """Identify node usage data"""
-        if 'category' in data and data.get('category') == 'node_usage':
-            return True
-        
-        # Check nested structure
-        if 'data' in data and isinstance(data.get('data'), dict):
-            inner = data['data']
-            if 'category' in inner and inner.get('category') == 'node_usage':
-                return True
-            # Check for metrics with node usage indicators
-            metrics = inner.get('metrics', {})
-            if isinstance(metrics, dict):
-                if any(k in metrics for k in ['cpu_usage', 'memory_used', 'cgroup_cpu_usage', 'cgroup_rss_usage']):
-                    return True
-        
-        # Direct metrics check
-        if 'metrics' in data and isinstance(data.get('metrics'), dict):
-            if any(k in data['metrics'] for k in ['cpu_usage', 'memory_used', 'cgroup_cpu_usage', 'cgroup_rss_usage']):
-                return True
-        
-        # Check for node_group in query_params
-        if 'query_params' in data and isinstance(data.get('query_params'), dict):
-            if 'node_group' in data['query_params']:
-                return True
-        
-        return False
 
     # ============================================================================
     # MAIN PROCESSING PIPELINE
