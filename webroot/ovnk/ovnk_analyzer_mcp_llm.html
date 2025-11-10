@@ -1158,12 +1158,25 @@
                     const healthDetails = clusterHealth.details || {};
                     const overallStatus = healthDetails.overall_cluster_health ||
                         healthDetails.health_details?.overall_cluster_health ||
+                        healthDetails.status ||
+                        clusterHealth.status ||
                         'unknown';
 
-                    console.log('Overall status:', overallStatus);
+                    const collectorsInitialized = healthDetails.collectors_initialized || false;
+                    const toolsAvailable = healthDetails.tools_available || 0;
+                    const prometheusConnection = healthDetails.prometheus_connection || 'unknown';
 
-                    if (overallStatus === 'healthy') {
-                        this.updateClusterStatus('connected', `Cluster ${overallStatus.charAt(0).toUpperCase()}${overallStatus.slice(1).toLowerCase()}`);
+                    console.log('Overall status:', overallStatus, 'Collectors:', collectorsInitialized, 'Tools:', toolsAvailable);
+
+                    // Determine cluster status based on multiple factors
+                    if (overallStatus === 'healthy' && collectorsInitialized) {
+                        this.updateClusterStatus('connected', `Cluster Healthy (${toolsAvailable} tools)`);
+                    } else if (overallStatus === 'healthy') {
+                        this.updateClusterStatus('connected', 'Cluster Healthy');
+                    } else if (overallStatus === 'partial' && collectorsInitialized) {
+                        this.updateClusterStatus('checking', `Cluster Partial (${toolsAvailable} tools)`);
+                    } else if (overallStatus === 'partial') {
+                        this.updateClusterStatus('checking', 'Cluster Status Partial');
                     } else if (overallStatus === 'unknown') {
                         this.updateClusterStatus('checking', 'Cluster Status Unknown');
                     } else {
