@@ -73,16 +73,13 @@ except ImportError as e:
 class MCPBaseModel(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
 
-
 class DurationInput(MCPBaseModel):
     duration: str = Field(default="1h", description="Time duration for metrics collection (e.g., '5m', '1h', '6h')")
-
 
 class TimeRangeInput(MCPBaseModel):
     start_time: Optional[str] = Field(default=None, description="Start time in ISO format")
     end_time: Optional[str] = Field(default=None, description="End time in ISO format")
     duration: Optional[str] = Field(default="1h", description="Duration if start/end not provided")
-
 
 class ClusterInfoRequest(MCPBaseModel):
     include_node_details: bool = Field(default=True, description="Include detailed node information")
@@ -117,6 +114,9 @@ class NetworkIORequest(MCPBaseModel):
     include_metrics: Optional[List[str]] = Field(default=None, description="Filter specific metrics")
     node_groups: Optional[List[str]] = Field(default=None, description="Filter by node groups")
 
+class HealthCheckRequest(MCPBaseModel):
+    pass
+
 class NetworkMetricsResponse(MCPBaseModel):
     status: str
     data: Optional[Dict[str, Any]] = None
@@ -124,6 +124,14 @@ class NetworkMetricsResponse(MCPBaseModel):
     timestamp: str
     category: Optional[str] = None
     duration: Optional[str] = None
+
+class HealthCheckResponse(MCPBaseModel):
+    status: str
+    timestamp: str
+    mcp_server: Dict[str, Any]
+    prometheus: Dict[str, Any]
+    kubeapi: Dict[str, Any]
+
 
 # Initialize MCP server
 mcp = FastMCP("OpenShift OVN-Kubernetes Analyzer")
@@ -230,39 +238,99 @@ async def initialize_collectors():
         return False
 
 @mcp.tool()
-async def get_server_health() -> MetricResponse:
-    """Get server health status and collector initialization status"""
-    collectors_initialized = all([
-        auth_manager is not None,
-        config is not None,
-        ovn_db_collector is not None,
-        latency_collector is not None,
-        ovs_collector is not None,
-        pods_collector is not None,
-        api_collector is not None,
-        cluster_info_collector is not None,
-        network_collector is not None
-    ])
+async def get_mcp_health_status(request: HealthCheckRequest | None = None) -> HealthCheckResponse:
+    """
+    Get MCP server health status and connectivity checks.
     
-    return MetricResponse(
-        status="healthy" if collectors_initialized else "unhealthy",
-        timestamp=datetime.now(pytz.UTC).isoformat(),
-        data={
-            "collectors_initialized": collectors_initialized,
-            "details": {
-                "auth_manager": auth_manager is not None,
-                "config": config is not None,
-                "ovn_db_collector": ovn_db_collector is not None,
-                "kubelet_cni_collector": "created on-demand",
-                "latency_collector": latency_collector is not None,
-                "ovs_collector": ovs_collector is not None,
-                "pods_collector": pods_collector is not None,
-                "api_collector": api_collector is not None,
-                "cluster_info_collector": cluster_info_collector is not None,
-                "network_collector": network_collector is not None
-            }
-        }
-    )
+    Verifies server status and connectivity to:
+    - MCP server operational status
+    - Prometheus connectivity and metrics availability
+    - Kubernetes API server connectivity
+    
+    Returns:
+        HealthCheckResponse: Server health status with component connectivity details
+    """
+    global auth_manager, config
+    
+    try:
+        if not auth_manager:
+            try:
+                await initialize_collectors()
+            except Exception as init_error:
+                logger.error(f"Failed to initialize collectors: {init_error}")
+                return HealthCheckResponse(
+                    status="error",
+                    timestamp=datetime.now(pytz.UTC).isoformat(),
+                    mcp_server={"running": False, "error": str(init_error)},
+                    prometheus={"connected": False},
+                    kubeapi={"connected": False}
+                )
+
+        # Test Prometheus
+        prometheus_ok = False
+        prometheus_error: Optional[str] = None
+        try:
+            if auth_manager:
+                # Get Prometheus config and test connection
+                prometheus_config = auth_manager.get_prometheus_config()
+                if prometheus_config and prometheus_config.get('url'):
+                    # Create a temporary PrometheusBaseQuery to test connection
+                    from tools.utils.promql_basequery import PrometheusBaseQuery
+                    token = prometheus_config.get('token')
+                    async with PrometheusBaseQuery(prometheus_config['url'], token) as prom:
+                        # Try a simple query to test connectivity
+                        test_result = await prom.query_instant("up")
+                        prometheus_ok = test_result is not None
+                else:
+                    prometheus_error = "Prometheus URL not configured"
+        except asyncio.TimeoutError:
+            prometheus_error = "Connection timeout"
+        except Exception as e:
+            prometheus_error = str(e)
+            logger.debug(f"Prometheus connection test failed: {e}")
+
+        # Test Kube API
+        kubeapi_ok = False
+        kubeapi_error: Optional[str] = None
+        try:
+            if auth_manager:
+                # Test Kubernetes API connection
+                kubeapi_ok = await asyncio.wait_for(
+                    auth_manager.test_kubeapi_connection(), timeout=10.0
+                ) if hasattr(auth_manager, 'test_kubeapi_connection') else False
+        except asyncio.TimeoutError:
+            kubeapi_error = "Connection timeout"
+        except Exception as e:
+            kubeapi_error = str(e)
+            logger.debug(f"KubeAPI connection test failed: {e}")
+
+        status = "healthy" if prometheus_ok and kubeapi_ok else ("degraded" if prometheus_ok or kubeapi_ok else "unhealthy")
+
+        return HealthCheckResponse(
+            status=status,
+            timestamp=datetime.now(pytz.UTC).isoformat(),
+            mcp_server={"running": True, "transport": "streamable-http"},
+            prometheus={
+                "connected": prometheus_ok,
+                "url": getattr(auth_manager, "prometheus_url", None) if auth_manager else None,
+                "error": prometheus_error,
+            },
+            kubeapi={
+                "connected": kubeapi_ok,
+                "node_count": (auth_manager.cluster_info.get("node_count") if (auth_manager and hasattr(auth_manager, 'cluster_info') and auth_manager.cluster_info) else None),
+                "error": kubeapi_error,
+            },
+        )
+    except Exception as e:
+        logger.error(f"Health check failed: {e}", exc_info=True)
+        return HealthCheckResponse(
+            status="error",
+            timestamp=datetime.now(pytz.UTC).isoformat(),
+            mcp_server={"running": False, "error": str(e)},
+            prometheus={"connected": False},
+            kubeapi={"connected": False}
+        )
+
 
 @mcp.tool()
 async def get_cluster_info(request: ClusterInfoRequest | None = None) -> MetricResponse:

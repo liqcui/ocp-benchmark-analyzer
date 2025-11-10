@@ -207,6 +207,7 @@ class MCPClient:
 
                         # Parameters should already be wrapped in 'request' key by MCPTool._arun
                         # If not wrapped, wrap them here
+                        # FastMCP expects {"request": {}} format even for tools with no parameters
                         if params is None:
                             request_params = {"request": {}}
                         elif "request" not in params:
@@ -335,7 +336,7 @@ class MCPClient:
             await self.connect()
             
             # Try different health check tools in order of preference
-            health_tools = ["get_server_health", "mcp_health_checking", "get_mcp_health_status"]
+            health_tools = ["get_mcp_health_status"]
             
             health_result = None
             tool_used = None
@@ -345,21 +346,16 @@ class MCPClient:
                 if any(tool["name"] == tool_name for tool in self.available_tools):
                     try:
                         logger.info(f"Trying health check with tool: {tool_name}")
-                        # For health checks, call_tool will return raw JSON (not HTML)
-                        # because these tools are in the special list
                         health_result = await self.call_tool(tool_name, {})
                         
                         # Check if we got a valid result
-                        if isinstance(health_result, dict):
-                            if "error" not in health_result and health_result:
-                                tool_used = tool_name
-                                break
-                            elif "error" in health_result:
-                                logger.warning(f"Tool {tool_name} returned error: {health_result.get('error')}")
-                                continue
-                        elif isinstance(health_result, str):
-                            # If it's a string (HTML), try to get raw JSON instead
-                            logger.warning(f"Tool {tool_name} returned string instead of dict, skipping")
+                        if (isinstance(health_result, dict) and 
+                            "error" not in health_result and 
+                            health_result):
+                            tool_used = tool_name
+                            break
+                        elif isinstance(health_result, dict) and "error" in health_result:
+                            logger.warning(f"Tool {tool_name} returned error: {health_result.get('error')}")
                             continue
                             
                     except Exception as tool_error:
@@ -370,38 +366,20 @@ class MCPClient:
             if health_result and tool_used:
                 # Extract health information based on tool type
                 overall_health = "unknown"
-                collectors_initialized = False
+                prometheus_connected = False
+                kubeapi_connected = False
                 
-                if tool_used == "get_server_health":
-                    # Handle MetricResponse structure
-                    status = health_result.get("status", "unknown")
-                    data = health_result.get("data", {})
-                    
-                    if isinstance(data, dict):
-                        collectors_initialized = data.get("collectors_initialized", False)
-                        details = data.get("details", {})
-                        # Extract more detailed health info if available
-                        if details:
-                            overall_health = status if status in ["healthy", "unhealthy"] else "unknown"
-                    else:
-                        overall_health = status
-                    
-                    return {
-                        "status": "healthy" if collectors_initialized else "partial",
-                        "prometheus_connection": "ok" if collectors_initialized else "unknown",
-                        "tools_available": len(self.available_tools),
-                        "collectors_initialized": collectors_initialized,
-                        "overall_cluster_health": overall_health,
-                        "tool_used": tool_used,
-                        "last_check": datetime.now(timezone.utc).isoformat(),
-                        "health_details": health_result
-                    }
-                elif tool_used in ["get_mcp_health_status", "mcp_health_checking"]:
+                if tool_used == "get_mcp_health_status":
                     overall_health = health_result.get("status", "unknown")
+                    # Extract connectivity info from health_details
+                    prometheus_info = health_result.get("prometheus", {})
+                    kubeapi_info = health_result.get("kubeapi", {})
+                    prometheus_connected = prometheus_info.get("connected", False)
+                    kubeapi_connected = kubeapi_info.get("connected", False)
                 
                 return {
-                    "status": "healthy",
-                    "prometheus_connection": "ok",
+                    "status": "healthy" if overall_health == "healthy" else ("partial" if overall_health == "degraded" else "partial"),
+                    "prometheus_connection": "ok" if prometheus_connected else "error",
                     "tools_available": len(self.available_tools),
                     "overall_cluster_health": overall_health,
                     "tool_used": tool_used,
@@ -410,12 +388,11 @@ class MCPClient:
                 }
             else:
                 # No tools worked, but MCP connection is established
-                # This is still a partial success since we can connect to MCP
                 return {
                     "status": "partial",
-                    "prometheus_connection": "unknown",
+                    "prometheus_connection": "error",
                     "tools_available": len(self.available_tools),
-                    "tool_error": "Health check tool not available or returned invalid response",
+                    "tool_error": "All health check tools failed or returned empty responses",
                     "overall_cluster_health": "unknown",
                     "last_check": datetime.now(timezone.utc).isoformat()
                 }

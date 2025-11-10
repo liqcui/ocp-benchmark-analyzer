@@ -943,4 +943,44 @@ class utilityELT:
         
         # Normal value
         else:
-            return formatted_value                        
+            return formatted_value
+
+    def format_latency_seconds(self, seconds: float) -> str:
+        """Format latency in seconds with appropriate unit"""
+        try:
+            seconds = float(seconds)
+            if seconds < 0.000001:
+                return f"{seconds * 1000000:.2f} μs"
+            elif seconds < 0.001:
+                return f"{seconds * 1000:.3f} ms"
+            elif seconds < 1:
+                return f"{seconds * 1000:.2f} ms"
+            else:
+                return f"{seconds:.3f} s"
+        except (ValueError, TypeError):
+            return str(seconds)
+
+    def get_latency_thresholds_ms(self) -> Dict[str, float]:
+        """Get standard latency thresholds in milliseconds"""
+        return {
+            'critical': 100.0,  # >100ms is critical
+            'warning': 50.0     # >50ms is warning
+        }
+
+    def highlight_latency_value(self, value_seconds: float, is_top: bool = False) -> str:
+        """Highlight latency value with color coding"""
+        try:
+            value_ms = float(value_seconds) * 1000  # Convert to ms for threshold comparison
+            thresholds = self.get_latency_thresholds_ms()
+            formatted = self.format_latency_seconds(value_seconds)
+            
+            if is_top:
+                return f'<span class="text-primary font-weight-bold bg-light px-1">🏆 {formatted}</span>'
+            elif value_ms >= thresholds['critical']:
+                return f'<span class="text-danger font-weight-bold">⚠️ {formatted}</span>'
+            elif value_ms >= thresholds['warning']:
+                return f'<span class="text-warning font-weight-bold">{formatted}</span>'
+            else:
+                return f'<span class="text-success">{formatted}</span>'
+        except (ValueError, TypeError):
+            return str(value_seconds)                                 

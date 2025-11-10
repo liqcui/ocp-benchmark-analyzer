@@ -125,6 +125,16 @@ class GenericELT(utilityELT):
             logger.warning(f"Could not import disk_io handler: {e}")
 
         try:
+            from ..pods.analyzer_elt_pods_usage import podsUsageELT
+            register_metric_handler(
+                'pods_usage',
+                podsUsageELT,
+                self._is_pods_usage
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import pods_usage handler: {e}")       
+
+        try:
             from ..disk.analyzer_elt_disk_io import diskIOELT
             register_metric_handler(
                 'disk_io',
@@ -272,6 +282,17 @@ class GenericELT(utilityELT):
             )
         except ImportError as e:
             logger.warning(f"Could not import general_info handler: {e}")
+     
+
+        try:
+            from ..ovnk.analyzer_elt_latency import ovnkLatencyELT
+            register_metric_handler(
+                'ovn_latency',
+                ovnkLatencyELT,
+                self._is_ovn_latency
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import ovn_latency handler: {e}")
 
     # ============================================================================
     # DATA TYPE IDENTIFICATION
@@ -369,6 +390,29 @@ class GenericELT(utilityELT):
         if 'query_params' in data and isinstance(data.get('query_params'), dict):
             if 'node_group' in data['query_params']:
                 return True
+        
+        return False
+
+    @staticmethod
+    def _is_pods_usage(data: Dict[str, Any]) -> bool:
+        """Identify pods usage data"""
+        if 'category' in data and data.get('category') == 'ovnk_pods_usage':
+            return True
+        
+        # Check nested structure
+        if 'data' in data and isinstance(data.get('data'), dict):
+            inner = data['data']
+            if 'ovnkube_node_containers' in inner:
+                return True
+            # Check for namespace and metrics structure
+            if 'namespace' in inner and 'metrics' in inner:
+                metrics = inner.get('metrics', {})
+                if any('container_cpu_usage' in k or 'container_memory' in k for k in metrics.keys()):
+                    return True
+        
+        # Direct structure check
+        if 'ovnkube_node_containers' in data:
+            return True
         
         return False
 
@@ -628,6 +672,31 @@ class GenericELT(utilityELT):
         
         return False
 
+    @staticmethod
+    def _is_ovn_latency(data: Dict[str, Any]) -> bool:
+        """Identify OVN latency data"""
+        if 'category' in data and data.get('category') == 'latency':
+            return True
+        
+        # Check nested structure
+        if 'data' in data and isinstance(data.get('data'), dict):
+            inner = data['data']
+            if 'category' in inner and inner.get('category') == 'latency':
+                return True
+            # Check for metrics with latency-specific names
+            metrics = inner.get('metrics', {})
+            if isinstance(metrics, dict):
+                if any('latency' in k or 'duration' in k for k in metrics.keys()):
+                    return True
+        
+        # Direct metrics check
+        if 'metrics' in data and isinstance(data.get('metrics'), dict):
+            if any('latency' in k or 'duration' in k or 'cni_request' in k 
+                for k in data['metrics'].keys()):
+                return True
+        
+        return False
+
 
     # ============================================================================
     # MAIN PROCESSING PIPELINE
@@ -681,7 +750,10 @@ class GenericELT(utilityELT):
                 summary_method = 'summarize_cluster_status'
             elif data_type == 'node_usage':
                 structured_data = handler.extract_node_usage(actual_data) if hasattr(handler, 'extract_node_usage') else {}
-                summary_method = 'summarize_node_usage'                  
+                summary_method = 'summarize_node_usage' 
+            elif data_type == 'pods_usage':
+                structured_data = handler.extract_pods_usage(actual_data) if hasattr(handler, 'extract_pods_usage') else {}
+                summary_method = 'summarize_pods_usage'
             elif data_type == 'disk_io':
                 structured_data = handler.extract_disk_io(actual_data) if hasattr(handler, 'extract_disk_io') else {}
                 summary_method = 'summarize_disk_io'                
@@ -723,7 +795,10 @@ class GenericELT(utilityELT):
                 summary_method = 'summarize_wal_fsync'
             elif data_type == 'general_info':
                 structured_data = handler.extract_general_info(actual_data) if hasattr(handler, 'extract_general_info') else {}
-                summary_method = 'summarize_general_info'                                             
+                summary_method = 'summarize_general_info'
+            elif data_type == 'ovn_latency':
+                structured_data = handler.extract_ovn_latency(actual_data) if hasattr(handler, 'extract_ovn_latency') else {}
+                summary_method = 'summarize_ovn_latency'                                                         
             else:
                 # Generic fallback
                 structured_data = handler.extract_cluster_info(actual_data) if hasattr(handler, 'extract_cluster_info') else {}
@@ -769,6 +844,12 @@ class GenericELT(utilityELT):
                 return data['result']['data']
 
         if data_type == 'node_usage':
+            if 'data' in data and isinstance(data.get('data'), dict):
+                return data['data']
+            if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
+                return data['result']['data']
+
+        if data_type == 'pods_usage':
             if 'data' in data and isinstance(data.get('data'), dict):
                 return data['data']
             if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
@@ -866,7 +947,14 @@ class GenericELT(utilityELT):
             if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
                 return data['result']['data']
         
-        return data                
+        return data  
+
+        if data_type == 'ovn_latency':
+            if 'data' in data and isinstance(data.get('data'), dict):
+                return data['data']
+            if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
+                return data['result']['data']
+
 
     def _process_generic(self, data: Dict[str, Any], data_type: str) -> Dict[str, Any]:
         """Generic processing for unknown data types"""

@@ -379,7 +379,6 @@ async def get_server_health() -> ServerHealthResponse:
         }
     )
 
-
 @mcp.tool()
 async def get_ocp_cluster_info() -> OCPClusterInfoResponse:
     """

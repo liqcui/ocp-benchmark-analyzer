@@ -196,6 +196,30 @@ def _sanitize_json_compat(value):
     except Exception:
         return None
 
+async def cleanup_resources():
+    """Clean up global resources on shutdown"""
+    global auth_manager
+    
+    logger.info("Cleaning up resources...")
+    
+    try:
+        if auth_manager:
+            await auth_manager.cleanup()
+    except Exception as e:
+        logger.error(f"Error cleaning up auth manager: {e}")
+    
+    logger.info("Resource cleanup completed")
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals"""
+    logger.info(f"Received signal {signum}, initiating shutdown...")
+    shutdown_event.set()
+
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
+
+# ==================== MCP Tools ====================
+
 async def initialize_components():
     """Initialize global components with proper error handling"""
     global auth_manager, config, prometheus_client
@@ -256,30 +280,6 @@ async def initialize_components():
     except Exception as e:
         logger.error(f"❌ Failed to initialize components: {e}")
         raise
-
-async def cleanup_resources():
-    """Clean up global resources on shutdown"""
-    global auth_manager
-    
-    logger.info("Cleaning up resources...")
-    
-    try:
-        if auth_manager:
-            await auth_manager.cleanup()
-    except Exception as e:
-        logger.error(f"Error cleaning up auth manager: {e}")
-    
-    logger.info("Resource cleanup completed")
-
-def signal_handler(signum, frame):
-    """Handle shutdown signals"""
-    logger.info(f"Received signal {signum}, initiating shutdown...")
-    shutdown_event.set()
-
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
-
-# ==================== MCP Tools ====================
 
 @mcp.tool()
 async def get_mcp_health_status(request: HealthCheckRequest) -> HealthCheckResponse:
