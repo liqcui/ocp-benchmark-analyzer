@@ -47,6 +47,20 @@ class NetworkIOCollector:
         
         # Get network_io metrics from config
         self.metrics = self.config.get_metrics_by_category('network_io')
+        
+        # If no network_io metrics found, try to load metrics-net.yml
+        if not self.metrics:
+            logger.warning("No network_io metrics found in config, attempting to load metrics-net.yml")
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(os.path.dirname(current_dir))
+            metrics_net_file = os.path.join(project_root, 'config', 'metrics-net.yml')
+            load_result = self.config.load_metrics_file(metrics_net_file)
+            if load_result.get('success'):
+                self.metrics = self.config.get_metrics_by_category('network_io')
+                logger.info(f"✅ Loaded {len(self.metrics)} network_io metrics from {metrics_net_file}")
+            else:
+                logger.error(f"Failed to load metrics file {metrics_net_file}: {load_result.get('error', 'Unknown error')}")
+        
         logger.info(f"Initialized NetworkIOCollector with {len(self.metrics)} metrics")
     
     async def initialize(self):
@@ -590,10 +604,11 @@ class NetworkIOCollector:
 
 async def main():
     """Example usage"""
-    from ocauth.openshift_auth import initialize_auth
+    from ocauth.openshift_auth import OpenShiftAuth
     
     # Initialize authentication
-    auth = await initialize_auth()
+    auth = OpenShiftAuth()
+    await auth.initialize()
     prom_config = auth.get_prometheus_config()
     
     # Create collector

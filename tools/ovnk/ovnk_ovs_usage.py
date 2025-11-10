@@ -1,554 +1,566 @@
 """
 OVS Usage Collector for OpenShift/Kubernetes
-Collects CPU, RAM, and flow metrics for OVS components
-File: /tools/ovnk_benchmark_prometheus_ovnk_ovs.py
+Collects CPU, RAM, flow, and performance metrics for OVS components
+Enhanced version using metrics configuration from metrics-ovs.yml
 """
 
-import json
 import asyncio
-import yaml
-from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Any, Optional, Union, Tuple
-from pathlib import Path
-import statistics
-import sys
+import logging
+from typing import Dict, List, Any, Optional
+from datetime import datetime
+import pytz
 import os
+import sys
 
-# Import the base modules
-sys.path.append('/tools')
-from .ovnk_benchmark_prometheus_basequery import PrometheusBaseQuery, PrometheusQueryError
-from ocauth.openshift_auth import OpenShiftAuth
+# Ensure project root on sys.path for utils imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from ocauth.openshift_auth import OpenShiftAuth as OCPAuth
+from tools.utils.promql_basequery import PrometheusBaseQuery
+from tools.utils.promql_utility import mcpToolsUtility
+from config.metrics_config_reader import Config
 
 
 class OVSUsageCollector:
-    """Collect OVS usage metrics from Prometheus"""
+    """Collector for OVS usage and performance metrics"""
     
-    def __init__(self, prometheus_client: PrometheusBaseQuery, auth_client: OpenShiftAuth):
-        self.prometheus_client = prometheus_client
-        self.auth_client = auth_client
-        self.metrics_config = self._load_metrics_config()
+    def __init__(self, ocp_auth: OCPAuth, duration: str = "1h", metrics_file_path: str = None):
+        self.ocp_auth = ocp_auth
+        self.duration = duration
+        self.logger = logging.getLogger(__name__)
+        self.utility = mcpToolsUtility(ocp_auth)
         
-        # Default PromQL queries if metrics.yaml is not available
-        self.default_queries = {
-            'ovs-vswitchd-cpu-usage': {
-                'query': 'sum by(node) (irate(container_cpu_usage_seconds_total{id=~"/system.slice/ovs-vswitchd.service"}[5m])*100)',
-                'unit': 'percent'
-            },
-            'ovsdb-server-cpu-usage': {
-                'query': 'sum(irate(container_cpu_usage_seconds_total{id=~"/system.slice/ovsdb-server.service"}[2m]) * 100) by (node)',
-                'unit': 'percent'
-            },
-            'ovs-db-memory': {
-                'query': 'ovs_db_process_resident_memory_bytes',
-                'unit': 'bytes'
-            },
-            'ovs-vswitchd-memory': {
-                'query': 'ovs_vswitchd_process_resident_memory_bytes',
-                'unit': 'bytes'
-            }
-        }
-    
-    def _load_metrics_config(self) -> Dict[str, Any]:
-        """Load metrics configuration from metrics.yaml"""
-        try:
-            metrics_path = Path('metrics.yaml')
-            if metrics_path.exists():
-                with open(metrics_path, 'r') as f:
-                    return yaml.safe_load(f)
-            else:
-                print("⚠️  metrics.yaml not found, using default queries")
-                return {}
-        except Exception as e:
-            print(f"⚠️  Error loading metrics.yaml: {e}")
-            return {}
-    
-    def _get_query_config(self, metric_name: str) -> Dict[str, str]:
-        """Get query configuration from metrics.yaml or defaults"""
-        if self.metrics_config:
-            # Search in metrics config
-            for metric in self.metrics_config.get('metrics', []):
-                if metric.get('metricName') == metric_name or metric_name in metric.get('metricName', ''):
-                    return {
-                        'query': metric.get('query', ''),
-                        'unit': metric.get('unit', '')
-                    }
+        # Load metrics configuration
+        if metrics_file_path is None:
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            metrics_file_path = os.path.join(project_root, 'config', 'metrics-ovs.yml')
         
-        # Fallback to default queries
-        return self.default_queries.get(metric_name, {})
-    
-    def _convert_bytes_to_readable(self, bytes_value: float) -> Tuple[float, str]:
-        """Convert bytes to KB, MB, or GB"""
-        if bytes_value >= 1024**3:  # GB
-            return round(bytes_value / (1024**3), 2), 'GB'
-        elif bytes_value >= 1024**2:  # MB
-            return round(bytes_value / (1024**2), 2), 'MB'
-        elif bytes_value >= 1024:  # KB
-            return round(bytes_value / 1024, 2), 'KB'
+        self.config = Config()
+        load_result = self.config.load_metrics_file(metrics_file_path)
+        
+        # Get category-specific metrics
+        self.category = "ovs"
+        self.ovs_metrics = self.config.get_metrics_by_category(self.category)
+        
+        # Log metrics loading
+        if load_result.get('success'):
+            metrics_count = len(self.ovs_metrics)
+            self.logger.info(f"✅ Loaded {metrics_count} metrics from {self.category} category (OVSUsageCollector)")
         else:
-            return round(bytes_value, 2), 'bytes'
+            self.logger.warning(f"⚠️ No {self.category} metrics found in configuration")
     
-    def _calculate_stats(self, values: List[float]) -> Dict[str, float]:
-        """Calculate min, avg, max statistics"""
-        if not values:
-            return {'min': 0, 'avg': 0, 'max': 0}
-        
-        return {
-            'min': round(min(values), 2),
-            'avg': round(statistics.mean(values), 2),
-            'max': round(max(values), 2)
-        }
-    
-    async def query_ovs_cpu_usage(self, duration: Optional[str] = None, time: Optional[str] = None) -> Dict[str, Any]:
-        """Query CPU usage for OVS components"""
+    async def collect_all_metrics(self) -> Dict[str, Any]:
+        """Collect all OVS metrics and return comprehensive results"""
         try:
-            results = {
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'query_type': 'instant' if not duration else 'range',
-                'ovs_vswitchd_cpu': [],
-                'ovsdb_server_cpu': [],
-                'summary': {
-                    'ovs_vswitchd_top10': [],
-                    'ovsdb_server_top10': []
-                }
-            }
+            prometheus_config = self.ocp_auth.get_prometheus_config()
             
-            # Get query configurations
-            vswitchd_config = self._get_query_config('ovs-vswitchd-cpu-usage')
-            ovsdb_config = self._get_query_config('ovsdb-server-cpu-usage')
-            
-            queries = {
-                'ovs_vswitchd': vswitchd_config.get('query', self.default_queries['ovs-vswitchd-cpu-usage']['query']),
-                'ovsdb_server': ovsdb_config.get('query', self.default_queries['ovsdb-server-cpu-usage']['query'])
-            }
-            
-            if duration:
-                # Range query
-                start_time, end_time = self.prometheus_client.get_time_range_from_duration(duration, time)
-                query_results = await self.prometheus_client.query_multiple_range(
-                    queries, start_time, end_time, '15s'
-                )
-            else:
-                # Instant query
-                query_results = await self.prometheus_client.query_multiple_instant(queries, time)
-            
-            # Process OVS vswitchd results
-            if 'ovs_vswitchd' in query_results and 'error' not in query_results['ovs_vswitchd']:
-                formatted_results = self.prometheus_client.format_query_result(
-                    query_results['ovs_vswitchd'], include_labels=True
-                )
-                
-                for result in formatted_results:
-                    node_name = result.get('labels', {}).get('node', 'unknown')
-                    
-                    if duration and 'values' in result:
-                        # Range query - calculate stats
-                        values = [v['value'] for v in result['values'] if v['value'] is not None]
-                        stats = self._calculate_stats(values)
-                    else:
-                        # Instant query
-                        value = result.get('value', 0) or 0
-                        stats = {'min': value, 'avg': value, 'max': value}
-                    
-                    results['ovs_vswitchd_cpu'].append({
-                        'node_name': node_name,
-                        **stats,
-                        'unit': '%'
-                    })
-            
-            # Process OVSDB server results
-            if 'ovsdb_server' in query_results and 'error' not in query_results['ovsdb_server']:
-                formatted_results = self.prometheus_client.format_query_result(
-                    query_results['ovsdb_server'], include_labels=True
-                )
-                
-                for result in formatted_results:
-                    node_name = result.get('labels', {}).get('node', 'unknown')
-                    
-                    if duration and 'values' in result:
-                        values = [v['value'] for v in result['values'] if v['value'] is not None]
-                        stats = self._calculate_stats(values)
-                    else:
-                        value = result.get('value', 0) or 0
-                        stats = {'min': value, 'avg': value, 'max': value}
-                    
-                    results['ovsdb_server_cpu'].append({
-                        'node_name': node_name,
-                        **stats,
-                        'unit': '%'
-                    })
-            
-            # Generate top 10 summaries
-            results['summary']['ovs_vswitchd_top10'] = sorted(
-                results['ovs_vswitchd_cpu'], 
-                key=lambda x: x['max'], 
-                reverse=True
-            )[:10]
-            
-            results['summary']['ovsdb_server_top10'] = sorted(
-                results['ovsdb_server_cpu'], 
-                key=lambda x: x['max'], 
-                reverse=True
-            )[:10]
-            
-            return results
-            
-        except Exception as e:
-            return {
-                'error': f'Failed to query OVS CPU usage: {str(e)}',
-                'timestamp': datetime.now(timezone.utc).isoformat()
-            }
-    
-    async def query_ovs_memory_usage(self, duration: Optional[str] = None, time: Optional[str] = None) -> Dict[str, Any]:
-        """Query RAM usage for OVS components"""
-        try:
-            results = {
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'query_type': 'instant' if not duration else 'range',
-                'ovs_db_memory': [],
-                'ovs_vswitchd_memory': [],
-                'summary': {
-                    'ovs_db_top10': [],
-                    'ovs_vswitchd_top10': []
-                }
-            }
-            
-            # Get query configurations
-            db_config = self._get_query_config('ovs-db-memory')
-            vswitchd_config = self._get_query_config('ovs-vswitchd-memory')
-            
-            queries = {
-                'ovs_db_memory': db_config.get('query', self.default_queries['ovs-db-memory']['query']),
-                'ovs_vswitchd_memory': vswitchd_config.get('query', self.default_queries['ovs-vswitchd-memory']['query'])
-            }
-            
-            if duration:
-                start_time, end_time = self.prometheus_client.get_time_range_from_duration(duration, time)
-                query_results = await self.prometheus_client.query_multiple_range(
-                    queries, start_time, end_time, '15s'
-                )
-            else:
-                query_results = await self.prometheus_client.query_multiple_instant(queries, time)
-            
-            # Process OVS DB memory results
-            if 'ovs_db_memory' in query_results and 'error' not in query_results['ovs_db_memory']:
-                formatted_results = self.prometheus_client.format_query_result(
-                    query_results['ovs_db_memory'], include_labels=True
-                )
-                
-                for result in formatted_results:
-                    pod_name = result.get('labels', {}).get('pod', result.get('labels', {}).get('instance', 'unknown'))
-                    
-                    if duration and 'values' in result:
-                        values = [v['value'] for v in result['values'] if v['value'] is not None]
-                        byte_stats = self._calculate_stats(values)
-                    else:
-                        value = result.get('value', 0) or 0
-                        byte_stats = {'min': value, 'avg': value, 'max': value}
-                    
-                    # Convert to readable units
-                    min_val, min_unit = self._convert_bytes_to_readable(byte_stats['min'])
-                    avg_val, avg_unit = self._convert_bytes_to_readable(byte_stats['avg'])
-                    max_val, max_unit = self._convert_bytes_to_readable(byte_stats['max'])
-                    
-                    results['ovs_db_memory'].append({
-                        'pod_name': pod_name,
-                        'min': min_val,
-                        'avg': avg_val,
-                        'max': max_val,
-                        'unit': max_unit  # Use max unit as representative
-                    })
-            
-            # Process OVS vswitchd memory results
-            if 'ovs_vswitchd_memory' in query_results and 'error' not in query_results['ovs_vswitchd_memory']:
-                formatted_results = self.prometheus_client.format_query_result(
-                    query_results['ovs_vswitchd_memory'], include_labels=True
-                )
-                
-                for result in formatted_results:
-                    pod_name = result.get('labels', {}).get('pod', result.get('labels', {}).get('instance', 'unknown'))
-                    
-                    if duration and 'values' in result:
-                        values = [v['value'] for v in result['values'] if v['value'] is not None]
-                        byte_stats = self._calculate_stats(values)
-                    else:
-                        value = result.get('value', 0) or 0
-                        byte_stats = {'min': value, 'avg': value, 'max': value}
-                    
-                    # Convert to readable units
-                    min_val, min_unit = self._convert_bytes_to_readable(byte_stats['min'])
-                    avg_val, avg_unit = self._convert_bytes_to_readable(byte_stats['avg'])
-                    max_val, max_unit = self._convert_bytes_to_readable(byte_stats['max'])
-                    
-                    results['ovs_vswitchd_memory'].append({
-                        'pod_name': pod_name,
-                        'min': min_val,
-                        'avg': avg_val,
-                        'max': max_val,
-                        'unit': max_unit
-                    })
-            
-            # Generate top 10 summaries (by max usage)
-            results['summary']['ovs_db_top10'] = sorted(
-                results['ovs_db_memory'],
-                key=lambda x: x['max'],
-                reverse=True
-            )[:10]
-            
-            results['summary']['ovs_vswitchd_top10'] = sorted(
-                results['ovs_vswitchd_memory'],
-                key=lambda x: x['max'],
-                reverse=True
-            )[:10]
-            
-            return results
-            
-        except Exception as e:
-            return {
-                'error': f'Failed to query OVS memory usage: {str(e)}',
-                'timestamp': datetime.now(timezone.utc).isoformat()
-            }
-    
-    async def query_ovs_dp_flows_total(self, duration: Optional[str] = None, time: Optional[str] = None) -> Dict[str, Any]:
-        """Query ovs_vswitchd_dp_flows_total metric"""
-        try:
-            query = 'ovs_vswitchd_dp_flows_total'
-            
-            if duration:
-                start_time, end_time = self.prometheus_client.get_time_range_from_duration(duration, time)
-                result = await self.prometheus_client.query_range(query, start_time, end_time, '15s')
-            else:
-                result = await self.prometheus_client.query_instant(query, time)
-            
-            formatted_results = self.prometheus_client.format_query_result(result, include_labels=True)
-            
-            flows_data = []
-            for item in formatted_results:
-                instance = item.get('labels', {}).get('instance', 'unknown')
-                
-                if duration and 'values' in item:
-                    values = [v['value'] for v in item['values'] if v['value'] is not None]
-                    stats = self._calculate_stats(values)
-                else:
-                    value = item.get('value', 0) or 0
-                    stats = {'min': value, 'avg': value, 'max': value}
-                
-                flows_data.append({
-                    'instance': instance,
-                    **stats,
-                    'unit': 'flows'
-                })
-            
-            # Sort by max flows and get top 10
-            top_10 = sorted(flows_data, key=lambda x: x['max'], reverse=True)[:10]
-            
-            return {
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'query_type': 'instant' if not duration else 'range',
-                'metric': 'ovs_vswitchd_dp_flows_total',
-                'data': flows_data,
-                'top_10': top_10
-            }
-            
-        except Exception as e:
-            return {
-                'error': f'Failed to query dp flows: {str(e)}',
-                'timestamp': datetime.now(timezone.utc).isoformat()
-            }
-    
-    async def query_ovs_bridge_flows_total(self, duration: Optional[str] = None, time: Optional[str] = None) -> Dict[str, Any]:
-        """Query ovs_vswitchd_bridge_flows_total for br-int and br-ex bridges"""
-        try:
-            queries = {
-                'br_int': 'ovs_vswitchd_bridge_flows_total{bridge="br-int"}',
-                'br_ex': 'ovs_vswitchd_bridge_flows_total{bridge="br-ex"}'
-            }
-            
-            if duration:
-                start_time, end_time = self.prometheus_client.get_time_range_from_duration(duration, time)
-                query_results = await self.prometheus_client.query_multiple_range(
-                    queries, start_time, end_time, '15s'
-                )
-            else:
-                query_results = await self.prometheus_client.query_multiple_instant(queries, time)
-            
-            results = {
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'query_type': 'instant' if not duration else 'range',
-                'br_int_flows': [],
-                'br_ex_flows': [],
-                'top_10': {
-                    'br_int': [],
-                    'br_ex': []
-                }
-            }
-            
-            # Process br-int results
-            if 'br_int' in query_results and 'error' not in query_results['br_int']:
-                formatted_results = self.prometheus_client.format_query_result(
-                    query_results['br_int'], include_labels=True
-                )
-                
-                for result in formatted_results:
-                    instance = result.get('labels', {}).get('instance', 'unknown')
-                    
-                    if duration and 'values' in result:
-                        values = [v['value'] for v in result['values'] if v['value'] is not None]
-                        stats = self._calculate_stats(values)
-                    else:
-                        value = result.get('value', 0) or 0
-                        stats = {'min': value, 'avg': value, 'max': value}
-                    
-                    results['br_int_flows'].append({
-                        'instance': instance,
-                        'bridge': 'br-int',
-                        **stats,
-                        'unit': 'flows'
-                    })
-            
-            # Process br-ex results
-            if 'br_ex' in query_results and 'error' not in query_results['br_ex']:
-                formatted_results = self.prometheus_client.format_query_result(
-                    query_results['br_ex'], include_labels=True
-                )
-                
-                for result in formatted_results:
-                    instance = result.get('labels', {}).get('instance', 'unknown')
-                    
-                    if duration and 'values' in result:
-                        values = [v['value'] for v in result['values'] if v['value'] is not None]
-                        stats = self._calculate_stats(values)
-                    else:
-                        value = result.get('value', 0) or 0
-                        stats = {'min': value, 'avg': value, 'max': value}
-                    
-                    results['br_ex_flows'].append({
-                        'instance': instance,
-                        'bridge': 'br-ex',
-                        **stats,
-                        'unit': 'flows'
-                    })
-            
-            # Generate top 10 for each bridge
-            results['top_10']['br_int'] = sorted(
-                results['br_int_flows'],
-                key=lambda x: x['max'],
-                reverse=True
-            )[:10]
-            
-            results['top_10']['br_ex'] = sorted(
-                results['br_ex_flows'],
-                key=lambda x: x['max'],
-                reverse=True
-            )[:10]
-            
-            return results
-            
-        except Exception as e:
-            return {
-                'error': f'Failed to query bridge flows: {str(e)}',
-                'timestamp': datetime.now(timezone.utc).isoformat()
-            }
-    
-    async def query_ovs_connection_metrics(self, duration: Optional[str] = None, time: Optional[str] = None) -> Dict[str, Any]:
-        """Query OVS connection metrics: stream_open, rconn_overflow, rconn_discarded"""
-        try:
-            queries = {
-                'stream_open': 'sum(ovs_vswitchd_stream_open)',
-                'rconn_overflow': 'sum(ovs_vswitchd_rconn_overflow)',
-                'rconn_discarded': 'sum(ovs_vswitchd_rconn_discarded)'
-            }
-            
-            if duration:
-                start_time, end_time = self.prometheus_client.get_time_range_from_duration(duration, time)
-                query_results = await self.prometheus_client.query_multiple_range(
-                    queries, start_time, end_time, '15s'
-                )
-            else:
-                query_results = await self.prometheus_client.query_multiple_instant(queries, time)
-            
-            results = {
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'query_type': 'instant' if not duration else 'range',
-                'connection_metrics': {}
-            }
-            
-            for metric_name, query_result in query_results.items():
-                if 'error' not in query_result:
-                    formatted_results = self.prometheus_client.format_query_result(query_result)
-                    
-                    if formatted_results:
-                        result = formatted_results[0]  # Sum queries return single result
-                        
-                        if duration and 'values' in result:
-                            values = [v['value'] for v in result['values'] if v['value'] is not None]
-                            stats = self._calculate_stats(values)
-                        else:
-                            value = result.get('value', 0) or 0
-                            stats = {'min': value, 'avg': value, 'max': value}
-                        
-                        results['connection_metrics'][metric_name] = {
-                            **stats,
-                            'unit': 'count'
-                        }
-                    else:
-                        results['connection_metrics'][metric_name] = {
-                            'min': 0, 'avg': 0, 'max': 0, 'unit': 'count'
-                        }
-                else:
-                    results['connection_metrics'][metric_name] = {
-                        'error': query_result['error']
+            async with PrometheusBaseQuery(prometheus_config.get('url'), prometheus_config.get('token')) as prom:
+                # Test connection first
+                connection_ok = await prom.test_connection()
+                if not connection_ok:
+                    return {
+                        'status': 'error',
+                        'error': "Prometheus connection failed",
+                        'timestamp': datetime.now(pytz.UTC).isoformat()
                     }
-            
-            return results
-            
+                
+                # Collect results for all metrics
+                results = {
+                    'status': 'success',
+                    'timestamp': datetime.now(pytz.UTC).isoformat(),
+                    'duration': self.duration,
+                    'category': 'ovs',
+                    'metrics': {}
+                }
+                
+                # Process each metric dynamically from config
+                for metric_config in self.ovs_metrics:
+                    metric_name = metric_config['name']
+                    self.logger.info(f"Collecting metric: {metric_name}")
+                    
+                    try:
+                        metric_result = await self._collect_generic_metric(prom, metric_config)
+                        results['metrics'][metric_name] = metric_result
+                        
+                    except Exception as e:
+                        self.logger.error(f"Error collecting metric {metric_name}: {e}")
+                        results['metrics'][metric_name] = {
+                            'status': 'error',
+                            'error': str(e)
+                        }
+                
+                # Add summary
+                successful_metrics = sum(1 for m in results['metrics'].values() if m.get('status') == 'success')
+                total_metrics = len(results['metrics'])
+                
+                results['summary'] = {
+                    'total_metrics': total_metrics,
+                    'successful_metrics': successful_metrics,
+                    'failed_metrics': total_metrics - successful_metrics
+                }
+                
+                # Generate cluster summary and add to results
+                cluster_summary = self._generate_cluster_summary(results)
+                results['cluster_health'] = cluster_summary['cluster_health']
+                results['performance_indicators'] = cluster_summary['performance_indicators']
+                results['recommendations'] = cluster_summary['recommendations']
+                
+                return results
+                
         except Exception as e:
+            self.logger.error(f"Error in collect_all_metrics: {e}")
             return {
-                'error': f'Failed to query connection metrics: {str(e)}',
-                'timestamp': datetime.now(timezone.utc).isoformat()
+                'status': 'error',
+                'error': str(e),
+                'timestamp': datetime.now(pytz.UTC).isoformat()
             }
     
-    async def collect_all_ovs_metrics(self, duration: Optional[str] = None, time: Optional[str] = None) -> Dict[str, Any]:
-        """Collect all OVS metrics in one comprehensive report"""
+    async def _collect_generic_metric(self, prom: PrometheusBaseQuery, metric_config: Dict[str, Any]) -> Dict[str, Any]:
+        """Generic method to collect any OVS metric"""
+        query = metric_config['expr']
+        metric_name = metric_config['name']
+        unit = metric_config.get('unit', 'unknown')
+        
         try:
-            print(f"🔍 Collecting OVS metrics {'for duration: ' + duration if duration else 'instant query'}...")
+            result = await self._query_with_stats(prom, query, self.duration)
             
-            # Collect all metrics concurrently
-            tasks = [
-                self.query_ovs_cpu_usage(duration, time),
-                self.query_ovs_memory_usage(duration, time),
-                self.query_ovs_dp_flows_total(duration, time),
-                self.query_ovs_bridge_flows_total(duration, time),
-                self.query_ovs_connection_metrics(duration, time)
-            ]
+            if result['status'] != 'success':
+                return {'status': 'error', 'error': result.get('error')}
             
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+            # Process results based on metric labels
+            metric_stats = {}
             
-            comprehensive_report = {
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'collection_type': 'instant' if not duration else f'range_{duration}',
-                'cpu_usage': results[0] if not isinstance(results[0], Exception) else {'error': str(results[0])},
-                'memory_usage': results[1] if not isinstance(results[1], Exception) else {'error': str(results[1])},
-                'dp_flows': results[2] if not isinstance(results[2], Exception) else {'error': str(results[2])},
-                'bridge_flows': results[3] if not isinstance(results[3], Exception) else {'error': str(results[3])},
-                'connection_metrics': results[4] if not isinstance(results[4], Exception) else {'error': str(results[4])}
+            for series in result.get('series_data', []):
+                labels = series['labels']
+                stats = series['statistics']
+                
+                # Determine grouping key (node, pod, instance, or bridge)
+                grouping_key = None
+                grouping_value = 'unknown'
+                
+                if 'node' in labels:
+                    grouping_key = 'node'
+                    grouping_value = labels['node']
+                elif 'pod' in labels:
+                    grouping_key = 'pod'
+                    grouping_value = labels['pod']
+                elif 'instance' in labels:
+                    grouping_key = 'instance'
+                    grouping_value = labels['instance']
+                elif 'bridge' in labels:
+                    grouping_key = 'bridge'
+                    grouping_value = labels['bridge']
+                    # Also include instance for bridge metrics
+                    if 'instance' in labels:
+                        grouping_value = f"{labels['bridge']}@{labels['instance']}"
+                
+                if grouping_value != 'unknown':
+                    # Format stats based on unit
+                    formatted_stats = self._format_stats_by_unit(stats, unit)
+                    formatted_stats['data_points'] = stats.get('count', 0)
+                    
+                    # Add additional context
+                    if grouping_key == 'bridge' and 'instance' in labels:
+                        formatted_stats['bridge'] = labels['bridge']
+                        formatted_stats['instance'] = labels['instance']
+                    
+                    metric_stats[grouping_value] = formatted_stats
+            
+            # Get node mapping for pods if applicable
+            node_mapping = {}
+            if any('pod' in key or '@' in key for key in metric_stats.keys()):
+                node_mapping = self.utility.get_pod_to_node_mapping_via_oc(namespace="openshift-ovn-kubernetes")
+            
+            return {
+                'status': 'success',
+                'metric': metric_name,
+                'title': metric_config.get('title', metric_name.replace('_', ' ').title()),
+                'unit': unit,
+                'description': metric_config.get('description', f'OVS metric: {metric_name}'),
+                'metric_data': metric_stats,
+                'node_mapping': node_mapping,
+                'total_entries': len(metric_stats),
+                'overall_stats': result.get('overall_statistics', {})
             }
-            
-            print("✅ OVS metrics collection completed")
-            return comprehensive_report
             
         except Exception as e:
+            self.logger.error(f"Error collecting metric {metric_name}: {e}")
+            return {'status': 'error', 'error': str(e)}
+    
+    def _format_stats_by_unit(self, stats: Dict[str, Any], unit: str) -> Dict[str, Any]:
+        """Format statistics based on the metric unit"""
+        if not stats:
+            return {}
+        
+        # Determine precision based on unit
+        precision = 2
+        if unit == 'percent':
+            precision = 2
+        elif unit == 'bytes':
+            precision = 0
+        elif unit in ['bytes_per_second', 'packets_per_second', 'errors_per_second']:
+            precision = 3
+        elif 'flow' in unit:
+            precision = 0
+        elif 'count' in unit:
+            precision = 0
+        
+        formatted = {
+            'avg': round(stats.get('avg', 0), precision),
+            'max': round(stats.get('max', 0), precision),
+            'min': round(stats.get('min', 0), precision),
+        }
+        
+        if stats.get('latest') is not None:
+            formatted['latest'] = round(stats['latest'], precision)
+        
+        return formatted
+    
+    async def _query_with_stats(self, prom_client: PrometheusBaseQuery, query: str, duration: str) -> Dict[str, Any]:
+        """Execute a range query and compute basic statistics per series and overall."""
+        try:
+            start, end = prom_client.get_time_range_from_duration(duration)
+            data = await prom_client.query_range(query, start, end, step='15s')
+
+            series_data: List[Dict[str, Any]] = []
+            all_values: List[float] = []
+
+            for item in data.get('result', []) if isinstance(data, dict) else []:
+                metric_labels = item.get('metric', {})
+                values = []
+                for ts, val in item.get('values', []) or []:
+                    try:
+                        v = float(val)
+                    except (ValueError, TypeError):
+                        continue
+                    if v != float('inf') and v != float('-inf'):
+                        values.append(v)
+
+                stats: Dict[str, Any] = {}
+                if values:
+                    avg_v = sum(values) / len(values)
+                    max_v = max(values)
+                    min_v = min(values)
+                    stats = {
+                        'avg': avg_v,
+                        'max': max_v,
+                        'min': min_v,
+                        'count': len(values),
+                        'latest': values[-1]
+                    }
+                    all_values.extend(values)
+
+                series_data.append({'labels': metric_labels, 'statistics': stats})
+
+            overall_statistics: Dict[str, Any] = {}
+            if all_values:
+                overall_statistics = {
+                    'avg': sum(all_values) / len(all_values),
+                    'max': max(all_values),
+                    'min': min(all_values),
+                    'count': len(all_values)
+                }
+
             return {
-                'error': f'Failed to collect comprehensive OVS metrics: {str(e)}',
-                'timestamp': datetime.now(timezone.utc).isoformat()
+                'status': 'success',
+                'series_data': series_data,
+                'overall_statistics': overall_statistics
+            }
+        except Exception as e:
+            return {'status': 'error', 'error': str(e)}
+    
+    # Individual metric collection methods
+    
+    async def get_ovs_vswitchd_cpu_usage(self) -> Dict[str, Any]:
+        """Get OVS vswitchd CPU usage per node"""
+        metric_config = self.config.get_metric_by_name('ovs_vswitchd_cpu_usage')
+        if not metric_config:
+            return {'status': 'error', 'error': 'Metric not found in configuration'}
+        
+        prometheus_config = self.ocp_auth.get_prometheus_config()
+        async with PrometheusBaseQuery(prometheus_config.get('url'), prometheus_config.get('token')) as prom:
+            return await self._collect_generic_metric(prom, metric_config)
+    
+    async def get_ovsdb_server_cpu_usage(self) -> Dict[str, Any]:
+        """Get OVSDB server CPU usage per node"""
+        metric_config = self.config.get_metric_by_name('ovsdb_server_cpu_usage')
+        if not metric_config:
+            return {'status': 'error', 'error': 'Metric not found in configuration'}
+        
+        prometheus_config = self.ocp_auth.get_prometheus_config()
+        async with PrometheusBaseQuery(prometheus_config.get('url'), prometheus_config.get('token')) as prom:
+            return await self._collect_generic_metric(prom, metric_config)
+    
+    async def get_ovs_db_memory_size(self) -> Dict[str, Any]:
+        """Get OVS database memory size"""
+        metric_config = self.config.get_metric_by_name('ovs_db_memory_size_bytes')
+        if not metric_config:
+            return {'status': 'error', 'error': 'Metric not found in configuration'}
+        
+        prometheus_config = self.ocp_auth.get_prometheus_config()
+        async with PrometheusBaseQuery(prometheus_config.get('url'), prometheus_config.get('token')) as prom:
+            return await self._collect_generic_metric(prom, metric_config)
+    
+    async def get_ovs_vswitch_memory_size(self) -> Dict[str, Any]:
+        """Get OVS vswitchd memory size"""
+        metric_config = self.config.get_metric_by_name('ovs_vswitch_memory_size_bytes')
+        if not metric_config:
+            return {'status': 'error', 'error': 'Metric not found in configuration'}
+        
+        prometheus_config = self.ocp_auth.get_prometheus_config()
+        async with PrometheusBaseQuery(prometheus_config.get('url'), prometheus_config.get('token')) as prom:
+            return await self._collect_generic_metric(prom, metric_config)
+    
+    async def get_ovs_datapath_flows_total(self) -> Dict[str, Any]:
+        """Get total datapath flows"""
+        metric_config = self.config.get_metric_by_name('ovs_datapath_flows_total')
+        if not metric_config:
+            return {'status': 'error', 'error': 'Metric not found in configuration'}
+        
+        prometheus_config = self.ocp_auth.get_prometheus_config()
+        async with PrometheusBaseQuery(prometheus_config.get('url'), prometheus_config.get('token')) as prom:
+            return await self._collect_generic_metric(prom, metric_config)
+    
+    async def get_ovs_bridge_flows_br_int(self) -> Dict[str, Any]:
+        """Get br-int bridge flows"""
+        metric_config = self.config.get_metric_by_name('ovs_bridge_flows_br_int')
+        if not metric_config:
+            return {'status': 'error', 'error': 'Metric not found in configuration'}
+        
+        prometheus_config = self.ocp_auth.get_prometheus_config()
+        async with PrometheusBaseQuery(prometheus_config.get('url'), prometheus_config.get('token')) as prom:
+            return await self._collect_generic_metric(prom, metric_config)
+    
+    async def get_ovs_bridge_flows_br_ex(self) -> Dict[str, Any]:
+        """Get br-ex bridge flows"""
+        metric_config = self.config.get_metric_by_name('ovs_bridge_flows_br_ex')
+        if not metric_config:
+            return {'status': 'error', 'error': 'Metric not found in configuration'}
+        
+        prometheus_config = self.ocp_auth.get_prometheus_config()
+        async with PrometheusBaseQuery(prometheus_config.get('url'), prometheus_config.get('token')) as prom:
+            return await self._collect_generic_metric(prom, metric_config)
+    
+    async def get_ovs_stream_connections_open(self) -> Dict[str, Any]:
+        """Get open OVS stream connections"""
+        metric_config = self.config.get_metric_by_name('ovs_stream_connections_open')
+        if not metric_config:
+            return {'status': 'error', 'error': 'Metric not found in configuration'}
+        
+        prometheus_config = self.ocp_auth.get_prometheus_config()
+        async with PrometheusBaseQuery(prometheus_config.get('url'), prometheus_config.get('token')) as prom:
+            return await self._collect_generic_metric(prom, metric_config)
+    
+    async def get_ovs_rconn_overflow_total(self) -> Dict[str, Any]:
+        """Get remote connection overflow count"""
+        metric_config = self.config.get_metric_by_name('ovs_rconn_overflow_total')
+        if not metric_config:
+            return {'status': 'error', 'error': 'Metric not found in configuration'}
+        
+        prometheus_config = self.ocp_auth.get_prometheus_config()
+        async with PrometheusBaseQuery(prometheus_config.get('url'), prometheus_config.get('token')) as prom:
+            return await self._collect_generic_metric(prom, metric_config)
+    
+    async def get_ovs_rconn_discarded_total(self) -> Dict[str, Any]:
+        """Get remote connections discarded count"""
+        metric_config = self.config.get_metric_by_name('ovs_rconn_discarded_total')
+        if not metric_config:
+            return {'status': 'error', 'error': 'Metric not found in configuration'}
+        
+        prometheus_config = self.ocp_auth.get_prometheus_config()
+        async with PrometheusBaseQuery(prometheus_config.get('url'), prometheus_config.get('token')) as prom:
+            return await self._collect_generic_metric(prom, metric_config)
+    
+    async def get_ovs_megaflow_cache_hits(self) -> Dict[str, Any]:
+        """Get megaflow cache hits"""
+        metric_config = self.config.get_metric_by_name('ovs_megaflow_cache_hits')
+        if not metric_config:
+            return {'status': 'error', 'error': 'Metric not found in configuration'}
+        
+        prometheus_config = self.ocp_auth.get_prometheus_config()
+        async with PrometheusBaseQuery(prometheus_config.get('url'), prometheus_config.get('token')) as prom:
+            return await self._collect_generic_metric(prom, metric_config)
+    
+    async def get_ovs_megaflow_cache_misses(self) -> Dict[str, Any]:
+        """Get megaflow cache misses"""
+        metric_config = self.config.get_metric_by_name('ovs_megaflow_cache_misses')
+        if not metric_config:
+            return {'status': 'error', 'error': 'Metric not found in configuration'}
+        
+        prometheus_config = self.ocp_auth.get_prometheus_config()
+        async with PrometheusBaseQuery(prometheus_config.get('url'), prometheus_config.get('token')) as prom:
+            return await self._collect_generic_metric(prom, metric_config)
+    
+    async def get_ovs_datapath_packet_rate(self) -> Dict[str, Any]:
+        """Get datapath packet processing rate"""
+        metric_config = self.config.get_metric_by_name('ovs_datapath_packet_rate')
+        if not metric_config:
+            return {'status': 'error', 'error': 'Metric not found in configuration'}
+        
+        prometheus_config = self.ocp_auth.get_prometheus_config()
+        async with PrometheusBaseQuery(prometheus_config.get('url'), prometheus_config.get('token')) as prom:
+            return await self._collect_generic_metric(prom, metric_config)
+    
+    async def get_ovs_datapath_error_rate(self) -> Dict[str, Any]:
+        """Get datapath error rate"""
+        metric_config = self.config.get_metric_by_name('ovs_datapath_error_rate')
+        if not metric_config:
+            return {'status': 'error', 'error': 'Metric not found in configuration'}
+        
+        prometheus_config = self.ocp_auth.get_prometheus_config()
+        async with PrometheusBaseQuery(prometheus_config.get('url'), prometheus_config.get('token')) as prom:
+            return await self._collect_generic_metric(prom, metric_config)
+    
+    async def get_ovs_interface_rx_bytes_rate(self) -> Dict[str, Any]:
+        """Get OVS interface receive bytes rate"""
+        metric_config = self.config.get_metric_by_name('ovs_interface_rx_bytes_rate')
+        if not metric_config:
+            return {'status': 'error', 'error': 'Metric not found in configuration'}
+        
+        prometheus_config = self.ocp_auth.get_prometheus_config()
+        async with PrometheusBaseQuery(prometheus_config.get('url'), prometheus_config.get('token')) as prom:
+            return await self._collect_generic_metric(prom, metric_config)
+    
+    async def get_ovs_interface_tx_bytes_rate(self) -> Dict[str, Any]:
+        """Get OVS interface transmit bytes rate"""
+        metric_config = self.config.get_metric_by_name('ovs_interface_tx_bytes_rate')
+        if not metric_config:
+            return {'status': 'error', 'error': 'Metric not found in configuration'}
+        
+        prometheus_config = self.ocp_auth.get_prometheus_config()
+        async with PrometheusBaseQuery(prometheus_config.get('url'), prometheus_config.get('token')) as prom:
+            return await self._collect_generic_metric(prom, metric_config)
+    
+    async def get_ovs_interface_rx_dropped_rate(self) -> Dict[str, Any]:
+        """Get OVS interface receive packets dropped rate"""
+        metric_config = self.config.get_metric_by_name('ovs_interface_rx_dropped_rate')
+        if not metric_config:
+            return {'status': 'error', 'error': 'Metric not found in configuration'}
+        
+        prometheus_config = self.ocp_auth.get_prometheus_config()
+        async with PrometheusBaseQuery(prometheus_config.get('url'), prometheus_config.get('token')) as prom:
+            return await self._collect_generic_metric(prom, metric_config)
+    
+    def _generate_cluster_summary(self, full_results: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate cluster-wide OVS performance summary from collected metrics"""
+        summary = {
+            'cluster_health': {
+                'total_nodes': 0,
+                'nodes_with_data': 0,
+                'ovs_performance': 'unknown'
+            },
+            'performance_indicators': {},
+            'recommendations': []
+        }
+        
+        if full_results.get('status') != 'success':
+            return summary
+        
+        # Analyze CPU usage
+        cpu_vswitchd = full_results['metrics'].get('ovs_vswitchd_cpu_usage', {})
+        if cpu_vswitchd.get('status') == 'success':
+            metric_data = cpu_vswitchd.get('metric_data', {})
+            summary['cluster_health']['total_nodes'] = len(metric_data)
+            
+            max_cpu = max([stats.get('max', 0) for stats in metric_data.values()], default=0)
+            avg_cpu = sum([stats.get('avg', 0) for stats in metric_data.values()]) / len(metric_data) if metric_data else 0
+            
+            summary['performance_indicators']['ovs_vswitchd_max_cpu_percent'] = max_cpu
+            summary['performance_indicators']['ovs_vswitchd_avg_cpu_percent'] = round(avg_cpu, 2)
+            
+            if max_cpu > 80:
+                summary['recommendations'].append("High OVS vswitchd CPU usage detected (>80%). Consider resource optimization.")
+        
+        # Analyze memory usage
+        memory_vswitchd = full_results['metrics'].get('ovs_vswitch_memory_size_bytes', {})
+        if memory_vswitchd.get('status') == 'success':
+            metric_data = memory_vswitchd.get('metric_data', {})
+            
+            max_mem_bytes = max([stats.get('max', 0) for stats in metric_data.values()], default=0)
+            max_mem_gb = round(max_mem_bytes / (1024**3), 2)
+            
+            summary['performance_indicators']['ovs_vswitchd_max_memory_gb'] = max_mem_gb
+            
+            if max_mem_gb > 2:
+                summary['recommendations'].append(f"High OVS vswitchd memory usage detected ({max_mem_gb}GB). Monitor for memory leaks.")
+        
+        # Analyze flow counts
+        flows = full_results['metrics'].get('ovs_datapath_flows_total', {})
+        if flows.get('status') == 'success':
+            metric_data = flows.get('metric_data', {})
+            
+            total_flows = sum([stats.get('avg', 0) for stats in metric_data.values()])
+            max_flows = max([stats.get('max', 0) for stats in metric_data.values()], default=0)
+            
+            summary['performance_indicators']['total_datapath_flows'] = int(total_flows)
+            summary['performance_indicators']['max_datapath_flows'] = int(max_flows)
+            
+            if max_flows > 100000:
+                summary['recommendations'].append("Very high flow count detected (>100k). Monitor flow table performance.")
+        
+        # Determine overall health
+        if not summary['recommendations']:
+            summary['cluster_health']['ovs_performance'] = 'good'
+        elif len(summary['recommendations']) <= 2:
+            summary['cluster_health']['ovs_performance'] = 'warning'
+        else:
+            summary['cluster_health']['ovs_performance'] = 'critical'
+        
+        return summary
+    
+    async def get_metric_by_name(self, metric_name: str) -> Dict[str, Any]:
+        """Get a specific metric by name"""
+        try:
+            metric_config = self.config.get_metric_by_name(metric_name)
+            if not metric_config:
+                return {
+                    'status': 'error',
+                    'error': f'Metric {metric_name} not found in configuration'
+                }
+            
+            prometheus_config = self.ocp_auth.get_prometheus_config()
+            
+            async with PrometheusBaseQuery(prometheus_config.get('url'), prometheus_config.get('token')) as prom:
+                connection_ok = await prom.test_connection()
+                if not connection_ok:
+                    return {
+                        'status': 'error',
+                        'error': "Prometheus connection failed"
+                    }
+                
+                return await self._collect_generic_metric(prom, metric_config)
+                
+        except Exception as e:
+            self.logger.error(f"Error getting metric {metric_name}: {e}")
+            return {
+                'status': 'error',
+                'error': str(e)
             }
 
 
-# Example usage and testing
+# Convenience functions for metric collection
+
+async def collect_ovs_metrics(ocp_auth: OCPAuth, duration: str = "1h") -> Dict[str, Any]:
+    """Convenience function to collect all OVS metrics"""
+    collector = OVSUsageCollector(ocp_auth, duration)
+    return await collector.collect_all_metrics()
+
+
+async def get_specific_ovs_metric(ocp_auth: OCPAuth, metric_name: str, duration: str = "1h") -> Dict[str, Any]:
+    """Convenience function to get a specific OVS metric"""
+    collector = OVSUsageCollector(ocp_auth, duration)
+    return await collector.get_metric_by_name(metric_name)
+
+
+# Example usage
 async def main():
     """Main function for testing OVS collector"""
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    
     try:
         # Initialize authentication
-        auth = OpenShiftAuth()
+        auth = OCPAuth()
         await auth.initialize()
         
         # Test Prometheus connection
@@ -556,33 +568,32 @@ async def main():
             print("❌ Cannot connect to Prometheus")
             return
         
-        # Initialize Prometheus client
-        async with PrometheusBaseQuery(auth.prometheus_url, auth.prometheus_token) as prometheus_client:
-            # Initialize OVS collector
-            ovs_collector = OVSUsageCollector(prometheus_client, auth)
-            
-            print("\n=== Testing Instant Queries ===")
-            
-            # Test CPU usage
-            cpu_results = await ovs_collector.query_ovs_cpu_usage()
-            print(f"CPU Usage Results: {json.dumps(cpu_results, indent=2)}")
-            
-            # Test Memory usage
-            memory_results = await ovs_collector.query_ovs_memory_usage()
-            print(f"Memory Usage Results: {json.dumps(memory_results, indent=2)}")
-            
-            # Test DP flows
-            dp_flows = await ovs_collector.query_ovs_dp_flows_total()
-            print(f"DP Flows: {json.dumps(dp_flows, indent=2)}")
-            
-            print("\n=== Testing Range Queries (5m) ===")
-            
-            # Test with 5-minute duration
-            range_results = await ovs_collector.collect_all_ovs_metrics(duration='5m')
-            print(f"5-minute Range Results: {json.dumps(range_results, indent=2)}")
-            
+        # Initialize OVS collector
+        collector = OVSUsageCollector(auth, duration='5m')
+        
+        print("\n=== Collecting All OVS Metrics ===")
+        results = await collector.collect_all_metrics()
+        
+        print(f"\nStatus: {results['status']}")
+        print(f"Total Metrics: {results['summary']['total_metrics']}")
+        print(f"Successful: {results['summary']['successful_metrics']}")
+        
+        # Print sample metric
+        if results['metrics']:
+            first_metric = list(results['metrics'].keys())[0]
+            print(f"\nSample Metric: {first_metric}")
+            print(f"Data: {results['metrics'][first_metric]}")
+        
+        # Print cluster summary (now included in results)
+        print("\n=== Cluster Summary ===")
+        print(f"Cluster Health: {results.get('cluster_health', {})}")
+        print(f"Performance Indicators: {results.get('performance_indicators', {})}")
+        print(f"Recommendations: {results.get('recommendations', [])}")
+        
     except Exception as e:
-        print(f"❌ Error in main: {e}")
+        print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 if __name__ == "__main__":

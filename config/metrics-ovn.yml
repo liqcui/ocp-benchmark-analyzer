@@ -1,0 +1,15 @@
+metrics:
+  # OVN Database Size Metrics
+  - name: nbdb_db_size_bytes
+    title: "nbdb_db_size_bytes"
+    expr: 'ovn_db_db_size_bytes{db_name=~"OVN_Northbound"}'
+    unit: bytes
+    description: "OVN Northbound database size"
+    category: ovn
+
+  - name: sbdb_db_size_bytes
+    title: "sbdb_db_size_bytes"
+    expr: 'ovn_db_db_size_bytes{db_name=~"OVN_Southbound"}'
+    unit: bytes
+    description: "OVN Southbound database size"
+    category: ovn

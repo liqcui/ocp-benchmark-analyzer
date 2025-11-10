@@ -1,0 +1,105 @@
+metrics:
+  # CNI Latency Metrics
+  - name: cni_request_add_latency_p99
+    title: "cni_request_add_latency_p99"
+    expr: 'histogram_quantile(0.99, sum by (pod, le) (rate(ovnkube_node_cni_request_duration_seconds_bucket{command="ADD"}[5m])) > 0)'
+    unit: seconds
+    description: "99th percentile latency for CNI ADD requests"
+    category: latency
+
+  - name: cni_request_del_latency_p99
+    title: "cni_request_del_latency_p99"
+    expr: 'histogram_quantile(0.99, sum by (pod, le) (rate(ovnkube_node_cni_request_duration_seconds_bucket{command="DEL"}[5m])) > 0)'
+    unit: seconds
+    description: "99th percentile latency for CNI DEL requests"
+    category: latency
+
+  # Pod Annotation Latency
+  - name: pod_annotation_latency_p99
+    title: "pod_annotation_latency_p99"
+    expr: 'histogram_quantile(0.99, sum by (pod, le) (rate(ovnkube_controller_pod_creation_latency_seconds_bucket[5m]))) > 0'
+    unit: seconds
+    description: "99th percentile latency for pod annotation processing"
+    category: latency
+
+  # Pod Creation Latency Metrics
+  - name: pod_first_seen_lsp_created_p99
+    title: "pod_first_seen_lsp_created_p99"
+    expr: 'histogram_quantile(0.99, sum by(pod, le) (rate(ovnkube_controller_pod_first_seen_lsp_created_duration_seconds_bucket[5m])))'
+    unit: seconds
+    description: "99th percentile latency for pod first seen to LSP created"
+    category: latency
+
+  - name: pod_lsp_created_p99
+    title: "pod_lsp_created_p99"
+    expr: 'histogram_quantile(0.99, sum by(pod, le) (rate(ovnkube_controller_pod_lsp_created_port_binding_duration_seconds_bucket[5m])))'
+    unit: seconds
+    description: "99th percentile latency for pod LSP creation to port binding"
+    category: latency
+
+  - name: pod_port_binding_p99
+    title: "pod_port_binding_p99"
+    expr: 'histogram_quantile(0.99, sum by(pod, le) (rate(ovnkube_controller_pod_port_binding_port_binding_chassis_duration_seconds_bucket[5m])))'
+    unit: seconds
+    description: "99th percentile latency for pod port binding to chassis binding"
+    category: latency
+
+  - name: pod_port_binding_up_p99
+    title: "pod_port_binding_up_p99"
+    expr: 'histogram_quantile(0.99, sum by(pod, le) (rate(ovnkube_controller_pod_port_binding_chassis_port_binding_up_duration_seconds_bucket[5m])))'
+    unit: seconds
+    description: "99th percentile latency for pod chassis binding to port up"
+    category: latency
+
+  # Service Latency Metrics
+  - name: sync_service_latency
+    title: "sync_service_latency"
+    expr: 'sum by (pod) (rate(ovnkube_controller_sync_service_latency_seconds_sum[5m])) / sum by (pod) (rate(ovnkube_controller_sync_service_latency_seconds_count[5m]))'
+    unit: seconds
+    description: "Average service synchronization latency"
+    category: latency
+
+  - name: sync_service_latency_p99
+    title: "sync_service_latency_p99"
+    expr: 'histogram_quantile(0.99, sum by (pod, le) (rate(ovnkube_controller_sync_service_latency_seconds_bucket[5m])) > 0)'
+    unit: seconds
+    description: "99th percentile service synchronization latency"
+    category: latency
+
+  # Network Configuration Application Metrics
+  - name: apply_network_config_pod_duration_p99
+    title: "apply_network_config_pod_duration_p99"
+    expr: 'histogram_quantile(0.99, sum by (pod, le) (rate(ovnkube_controller_network_programming_duration_seconds_bucket[5m])) > 0)'
+    unit: seconds
+    description: "99th percentile latency for applying network configuration to pods"
+    category: latency
+
+  - name: apply_network_config_service_duration_p99
+    title: "apply_network_config_service_duration_p99"
+    expr: 'histogram_quantile(0.99, sum by (service, le) (rate(ovnkube_controller_network_programming_duration_seconds_bucket[5m])) > 0)'
+    unit: seconds
+    description: "99th percentile latency for applying network configuration to services"
+    category: latency
+
+  # Controller and Node Ready Duration
+  - name: ovnkube_controller_ready_duration_seconds
+    title: "ovnkube_controller_ready_duration_seconds"
+    expr: 'topk(10, ovnkube_controller_ready_duration_seconds)'
+    unit: seconds
+    description: "Time taken for ovnkube-controller to become ready"
+    category: latency
+
+  - name: ovnkube_node_ready_duration_seconds
+    title: "ovnkube_node_ready_duration_seconds"
+    expr: 'topk(10, ovnkube_node_ready_duration_seconds)'
+    unit: seconds
+    description: "Time taken for ovnkube-node to become ready"
+    category: latency
+
+  # Controller Sync Duration
+  - name: ovnkube_controller_sync_duration_seconds
+    title: "ovnkube_controller_sync_duration_seconds"
+    expr: 'ovnkube_controller_sync_duration_seconds{namespace="openshift-ovn-kubernetes"}'
+    unit: seconds
+    description: "Duration of controller sync operations"
+    category: latency

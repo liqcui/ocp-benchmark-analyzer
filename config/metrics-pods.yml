@@ -1,0 +1,41 @@
+metrics:
+  # CPU Usage Metrics
+  - name: container_cpu_usage_percent
+    title: "container_cpu_usage_percent"
+    expr: 'rate(container_cpu_usage_seconds_total{pod=~"$pod_name", container!="POD", container=~"$container_name"}[5m]) * 100'
+    unit: percent
+    description: "Container CPU usage percentage over 5 minutes"
+    category: pods
+
+  # Memory Usage Metrics
+  - name: container_memory_rss_bytes
+    title: "container_memory_rss_bytes"
+    expr: 'container_memory_rss{pod=~"$pod_name", container!="POD", container=~"$container_name"}'
+    unit: bytes
+    description: "Container memory RSS usage"
+    category: pods
+
+  - name: container_memory_working_set_bytes
+    title: "container_memory_working_set_bytes"
+    expr: 'container_memory_working_set_bytes{pod=~"$pod_name", container!="POD", container=~"$container_name"}'
+    unit: bytes
+    description: "Container memory working set"
+    category: pods
+
+  - name: pod-status
+    expr: 'sum(kube_pod_status_phase{}) by (phase) > 0'
+    unit: count
+    description: "Pod status"
+    category: pods
+
+  - name: namespace-status
+    expr: 'sum(kube_namespace_status_phase) by (phase)'
+    unit: count
+    description: "Namespace status"
+    category: pods
+
+  - name: pod_distribution
+    expr: 'count(kube_pod_info{}) by (node)'
+    unit: count
+    description: "Pod distribution"
+    category: pods

@@ -1,0 +1,6 @@
+metrics:
+  - name: top_alerts
+    expr: 'topk(15,sum(ALERTS{severity!="none"}) by (alertname, severity))'
+    unit: count
+    description: "Top alerts"
+    category: alerts

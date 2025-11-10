@@ -1,0 +1,99 @@
+metrics:
+  #API Server Metrics
+  - name: avg_ro_apicalls_latency
+    title: "avg_ro_apicalls_latency"
+    expr: 'avg_over_time(histogram_quantile(0.99, sum(irate(apiserver_request_duration_seconds_bucket{apiserver="kube-apiserver", verb=~"LIST|GET", subresource!~"log|exec|portforward|attach|proxy"}[2m])) by (le, resource, verb, scope))[5m:]) > 0'
+    unit: seconds
+    description: "Average 99th percentile latency for read-only API calls"
+    category: api_server
+
+  - name: max_ro_apicalls_latency
+    title: "max_ro_apicalls_latency"
+    expr: 'max_over_time(histogram_quantile(0.99, sum(irate(apiserver_request_duration_seconds_bucket{apiserver="kube-apiserver", verb=~"LIST|GET", subresource!~"log|exec|portforward|attach|proxy"}[2m])) by (le, resource, verb, scope))[5m:]) > 0'
+    unit: seconds
+    description: "Maximum 99th percentile latency for read-only API calls"
+    category: api_server
+
+  - name: avg_mutating_apicalls_latency
+    title: "avg_mutating_apicalls_latency"
+    expr: 'avg_over_time(histogram_quantile(0.99, sum(irate(apiserver_request_duration_seconds_bucket{apiserver="kube-apiserver", verb=~"POST|PUT|DELETE|PATCH", subresource!~"log|exec|portforward|attach|proxy"}[2m])) by (le, resource, verb, scope))[5m:]) > 0'
+    unit: seconds
+    description: "Average 99th percentile latency for mutating API calls"
+    category: api_server
+
+  - name: max_mutating_apicalls_latency
+    title: "max_mutating_apicalls_latency"
+    expr: 'max_over_time(histogram_quantile(0.99, sum(irate(apiserver_request_duration_seconds_bucket{apiserver="kube-apiserver", verb=~"POST|PUT|DELETE|PATCH", subresource!~"log|exec|portforward|attach|proxy"}[2m])) by (le, resource, verb, scope))[5m:]) > 0'
+    unit: seconds
+    description: "Maximum 99th percentile latency for mutating API calls"
+    category: api_server
+
+  - name: api_request_rate
+    title: "api_request_rate"
+    expr: 'sum(rate(apiserver_request_total{apiserver="kube-apiserver"}[5m])) by (verb, resource)'
+    unit: requests_per_second
+    description: "API server request rate by verb and resource"
+    category: api_server
+
+  - name: api_request_errors
+    title: "api_request_errors"
+    expr: 'sum(rate(apiserver_request_total{apiserver="kube-apiserver", code!~"2.."}[5m])) by (verb, resource, code)'
+    unit: requests_per_second
+    description: "API server request error rate by verb, resource and code"
+    category: api_server
+
+  - name: api_server_current_inflight_requests
+    title: "api_server_current_inflight_requests"
+    expr: 'sum(apiserver_current_inflight_requests{apiserver="kube-apiserver"}) by (request_kind)'
+    unit: count
+    description: "Current number of inflight requests by request kind"
+    category: api_server
+
+  - name: etcd_request_duration
+    title: "etcd_request_duration"
+    expr: 'histogram_quantile(0.99, sum(rate(etcd_request_duration_seconds_bucket{job=~".*etcd.*"}[5m])) by (le, operation, type))'
+    unit: seconds
+    description: "99th percentile etcd request duration by operation and type"
+    category: api_server
+
+  - name: request_latency_p99_by_verb
+    title: "request_latency_p99_by_verb"
+    expr: 'histogram_quantile(0.99, sum(rate(apiserver_request_duration_seconds_bucket{apiserver=~"$apiserver",instance=~"$instance",resource=~"$resource",subresource!="log",verb=~"$verb",verb!~"WATCH|WATCHLIST|PROXY"}[$interval])) by(verb,le))'
+    unit: seconds
+    description: "99th percentile request duration by verb"
+    category: api_server
+
+  - name: request_duration_p99_by_resource
+    title: "request_duration_p99_by_resource"
+    expr: 'histogram_quantile(0.99, sum(rate(apiserver_request_duration_seconds_bucket{apiserver=~"$apiserver",instance=~"$instance",resource=~"$resource",subresource!="log",verb=~"$verb",verb!~"WATCH|WATCHLIST|PROXY"}[$interval])) by(resource,le))'
+    unit: seconds
+    description: "99th percentile request duration by resource"
+    category: api_server
+
+  - name: pf_request_wait_duration_p99
+    title: "pf_request_wait_duration_p99"
+    expr: 'histogram_quantile(0.99, sum(rate(apiserver_flowcontrol_request_wait_duration_seconds_bucket{instance=~"$instance",flow_schema=~"$flow_schema",priority_level=~"$priority_level"}[5m])) by(flow_schema, priority_level, le))'
+    unit: seconds
+    description: "Priority and Fairness - 99th percentile request wait duration"
+    category: api_server
+
+  - name: pf_request_execution_duration_p99
+    title: "pf_request_execution_duration_p99"
+    expr: 'histogram_quantile(0.99, sum(rate(apiserver_flowcontrol_request_execution_seconds_bucket{instance=~"$instance",flow_schema=~"$flow_schema",priority_level=~"$priority_level"}[$interval])) by(flow_schema, priority_level, le))'
+    unit: seconds
+    description: "Priority and Fairness - 99th percentile request execution duration"
+    category: api_server
+
+  - name: pf_request_dispatch_rate
+    title: "pf_request_dispatch_rate"
+    expr: 'sum(rate(apiserver_flowcontrol_dispatched_requests_total{instance=~"$instance",flow_schema=~"$flow_schema",priority_level=~"$priority_level"}[$interval])) by(flow_schema,priority_level)'
+    unit: requests_per_second
+    description: "Priority and Fairness - request dispatch rate"
+    category: api_server
+
+  - name: pf_request_in_queue
+    title: "pf_request_in_queue"
+    expr: 'sum(apiserver_flowcontrol_current_inqueue_requests{instance=~"$instance",flow_schema=~"$flow_schema",priority_level=~"$priority_level"}) by (flow_schema,priority_level)'
+    unit: count
+    description: "Priority and Fairness - current requests in queue"
+    category: api_server

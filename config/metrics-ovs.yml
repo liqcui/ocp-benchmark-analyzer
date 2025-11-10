@@ -1,0 +1,125 @@
+metrics:
+  # CPU Usage Metrics
+  - name: ovs_vswitchd_cpu_usage
+    title: "ovs_vswitchd_cpu_usage"
+    expr: 'sum by(node) (irate(container_cpu_usage_seconds_total{id=~"/system.slice/ovs-vswitchd.service"}[5m])*100)'
+    unit: percent
+    description: "OVS vswitchd CPU usage percentage per node"
+    category: ovs
+
+  - name: ovsdb_server_cpu_usage
+    title: "ovsdb_server_cpu_usage"
+    expr: 'sum(irate(container_cpu_usage_seconds_total{id=~"/system.slice/ovsdb-server.service"}[2m]) * 100) by (node)'
+    unit: percent
+    description: "OVSDB server CPU usage percentage per node"
+    category: ovs
+
+  # Memory Usage Metrics
+  - name: ovs_db_memory_size_bytes
+    title: "ovs_db_memory_size_bytes"
+    expr: 'ovs_db_process_resident_memory_bytes'
+    unit: bytes
+    description: "OVS database process resident memory size"
+    category: ovs
+
+  - name: ovs_vswitch_memory_size_bytes
+    title: "ovs_vswitch_memory_size_bytes"
+    expr: 'ovs_vswitchd_process_resident_memory_bytes'
+    unit: bytes
+    description: "OVS vswitchd process resident memory size"
+    category: ovs
+
+  # Flow Table Metrics
+  - name: ovs_datapath_flows_total
+    title: "ovs_datapath_flows_total"
+    expr: 'ovs_vswitchd_dp_flows_total'
+    unit: flows
+    description: "Total number of datapath flows in OVS"
+    category: ovs
+
+  - name: ovs_bridge_flows_br_int
+    title: "ovs_bridge_flows_br_int"
+    expr: 'ovs_vswitchd_bridge_flows_total{bridge="br-int"}'
+    unit: flows
+    description: "Total flows in br-int bridge"
+    category: ovs
+
+  - name: ovs_bridge_flows_br_ex
+    title: "ovs_bridge_flows_br_ex"
+    expr: 'ovs_vswitchd_bridge_flows_total{bridge="br-ex"}'
+    unit: flows
+    description: "Total flows in br-ex bridge"
+    category: ovs
+
+  # Connection and Stream Metrics
+  - name: ovs_stream_connections_open
+    title: "ovs_stream_connections_open"
+    expr: 'sum(ovs_vswitchd_stream_open)'
+    unit: count
+    description: "Total number of open OVS stream connections"
+    category: ovs
+
+  - name: ovs_rconn_overflow_total
+    title: "ovs_rconn_overflow_total"
+    expr: 'sum(ovs_vswitchd_rconn_overflow)'
+    unit: count
+    description: "Total number of OVS remote connection overflows"
+    category: ovs
+
+  - name: ovs_rconn_discarded_total
+    title: "ovs_rconn_discarded_total"
+    expr: 'sum(ovs_vswitchd_rconn_discarded)'
+    unit: count
+    description: "Total number of OVS remote connections discarded"
+    category: ovs
+
+  # Performance Metrics
+  - name: ovs_megaflow_cache_hits
+    title: "ovs_megaflow_cache_hits"
+    expr: 'ovs_vswitchd_megaflow_cache_hits_total'
+    unit: count
+    description: "Total megaflow cache hits"
+    category: ovs
+
+  - name: ovs_megaflow_cache_misses
+    title: "ovs_megaflow_cache_misses"
+    expr: 'ovs_vswitchd_megaflow_cache_misses_total'
+    unit: count
+    description: "Total megaflow cache misses"
+    category: ovs
+
+  - name: ovs_datapath_packet_rate
+    title: "ovs_datapath_packet_rate"
+    expr: 'rate(ovs_vswitchd_datapath_packets_total[5m])'
+    unit: packets_per_second
+    description: "OVS datapath packet processing rate"
+    category: ovs
+
+  - name: ovs_datapath_error_rate
+    title: "ovs_datapath_error_rate"
+    expr: 'rate(ovs_vswitchd_datapath_errors_total[5m])'
+    unit: errors_per_second
+    description: "OVS datapath error rate"
+    category: ovs
+
+  # Network Interface Metrics
+  - name: ovs_interface_rx_bytes_rate
+    title: "ovs_interface_rx_bytes_rate"
+    expr: 'rate(container_network_receive_bytes_total{interface=~"ovs.*"}[5m])'
+    unit: bytes_per_second
+    description: "OVS interface receive bytes rate"
+    category: ovs
+
+  - name: ovs_interface_tx_bytes_rate
+    title: "ovs_interface_tx_bytes_rate"
+    expr: 'rate(container_network_transmit_bytes_total{interface=~"ovs.*"}[5m])'
+    unit: bytes_per_second
+    description: "OVS interface transmit bytes rate"
+    category: ovs
+
+  - name: ovs_interface_rx_dropped_rate
+    title: "ovs_interface_rx_dropped_rate"
+    expr: 'rate(container_network_receive_packets_dropped_total{interface=~"ovs.*"}[5m])'
+    unit: packets_per_second
+    description: "OVS interface receive packets dropped rate"
+    category: ovs

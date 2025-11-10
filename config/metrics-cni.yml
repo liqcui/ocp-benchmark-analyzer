@@ -1,0 +1,108 @@
+metrics:
+  - name: cni_cpu_usage
+    expr: 'topk(10,irate(process_cpu_seconds_total{service="kubelet",job="kubelet"}[5m])*100 *  on (node) group_left kube_node_role{ role = "worker" })'
+    unit: percent
+    description: "CNI CPU usage"
+    category: cni
+
+  - name: crio_cpu_usage
+    expr: 'topk(10,irate(process_cpu_seconds_total{service="kubelet",job="crio"}[5m])*100 *  on (node) group_left kube_node_role{ role = "worker" })'
+    unit: percent
+    description: "CRIO CPU usage"
+    category: cni
+
+  - name: cni_memory_usage
+    expr: 'topk(10,process_resident_memory_bytes{service="kubelet",job="kubelet"} *  on (node) group_left kube_node_role{ role = "worker" })'
+    unit: bytes
+    description: "CNI memory usage"
+    category: cni
+
+  - name: crio_memory_usage
+    expr: 'topk(10,process_resident_memory_bytes{service="kubelet",job="crio"} *  on (node) group_left kube_node_role{ role = "worker" })'
+    unit: bytes
+    description: "CRIO memory usage"
+    category: cni
+
+  - name: cni_network_usage
+    expr: 'topk(10,label_replace(irate(node_network_receive_bytes_total{device=~"^(ens|eth|bond|team).*"}[5m]), "node", "$1", "instance", "(.*)") * on (node) group_left kube_node_role{ role = "worker" })'
+    unit: bytes
+    description: "CNI network usage"
+    category: cni
+
+  - name: crio_network_usage
+    expr: 'topk(10,label_replace(irate(node_network_receive_bytes_total{device=~"^(ens|eth|bond|team).*"}[5m]), "node", "$1", "instance", "(.*)") * on (node) group_left kube_node_role{ role = "worker" })'
+    unit: bytes
+    description: "CRIO network usage"
+    category: cni
+  
+  - name: cni_network_drop
+    expr: 'topk(10,label_replace(rate(node_network_receive_drop_total{device=~"^(ens|eth|bond|team).*"}[5m]), "node", "$1", "instance", "(.*)") * on (node) group_left kube_node_role{ role = "worker" })'
+    unit: packets
+    description: "CNI network drop"
+    category: cni
+
+  - name: crio_network_drop
+    expr: 'topk(10,label_replace(rate(node_network_receive_drop_total{device=~"^(ens|eth|bond|team).*"}[5m]), "node", "$1", "instance", "(.*)") * on (node) group_left kube_node_role{ role = "worker" })'
+    unit: packets
+    description: "CRIO network drop"
+    category: cni
+
+  - name: cni_network_error
+    expr: 'topk(10,label_replace(rate(node_network_receive_errs_total{device=~"^(ens|eth|bond|team).*"}[5m]), "node", "$1", "instance", "(.*)") * on (node) group_left kube_node_role{ role = "worker" })'
+    unit: packets
+    description: "CNI network error"
+    category: cni
+
+  - name: crio_network_error
+    expr: 'topk(10,label_replace(rate(node_network_receive_errs_total{device=~"^(ens|eth|bond|team).*"}[5m]), "node", "$1", "instance", "(.*)") * on (node) group_left kube_node_role{ role = "worker" })'
+    unit: packets
+    description: "CRIO network error"
+    category: cni
+  
+  - name: cni_network_utilization
+    expr: 'topk(10,label_replace(irate(node_network_receive_bytes_total{device=~"^(ens|eth|bond|team).*"}[5m]), "node", "$1", "instance", "(.*)") * on (node) group_left kube_node_role{ role = "worker" })'
+    unit: bytes
+    description: "CNI network utilization"
+    category: cni
+
+  - name: crio_network_utilization
+    expr: 'topk(10,label_replace(irate(node_network_receive_bytes_total{device=~"^(ens|eth|bond|team).*"}[5m]), "node", "$1", "instance", "(.*)") * on (node) group_left kube_node_role{ role = "worker" })'
+    unit: bytes
+    description: "CRIO network utilization"
+    category: cni
+
+  - name: container_threads
+    expr: 'sum by (node) (container_threads{ container!=""})  * on (node) group_left kube_node_role{ role = "worker" }'
+    unit: threads
+    description: "container threads"
+    category: cni
+
+  - name: control_plane_threads
+    expr: 'sum by (node) (container_threads{ container!=""})  * on (node) group_left kube_node_role{ role = "control-plane" }'
+    unit: threads
+    description: "control plane threads"
+    category: cni
+
+  - name: worker_io_read_iops
+    expr: 'label_replace(rate(node_disk_reads_completed_total[5m]), "node", "$1", "instance", "(.*)") * on (node) group_left kube_node_role{ role = "worker" }'
+    unit: iops
+    description: "Worker read IOPS"
+    category: cni
+
+  - name: worker_io_write_iops
+    expr: 'label_replace(rate(node_disk_writes_completed_total[5m]), "node", "$1", "instance", "(.*)") * on (node) group_left kube_node_role{ role = "worker" }'
+    unit: iops
+    description: "Worker write IOPS"
+    category: cni
+
+  - name: control_plane_io_read_iops
+    expr: 'label_replace(rate(node_disk_reads_completed_total[5m]), "node", "$1", "instance", "(.*)") * on (node) group_left kube_node_role{ role = "control-plane" }'
+    unit: iops
+    description: "Control plane read IOPS"
+    category: cni
+
+  - name: control_plane_io_write_iops
+    expr: 'label_replace(rate(node_disk_writes_completed_total[5m]), "node", "$1", "instance", "(.*)") * on (node) group_left kube_node_role{ role = "control-plane" }'
+    unit: iops
+    description: "Control plane write IOPS"
+    category: cni
