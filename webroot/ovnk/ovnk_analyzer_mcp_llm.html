@@ -773,6 +773,28 @@
             }
         }
 
+        // Fix common mojibake (UTF-8 shown as Latin-1) like "⚠️" safely
+        function fixMojibake(text) {
+            try {
+                if (!text || typeof text !== 'string') return text;
+                // Heuristic: attempt fix only when typical mojibake lead bytes appear
+                const maybeMojibake = /[ÃÂâð]/.test(text);
+                if (!maybeMojibake) return text;
+                try {
+                    // Reinterpret string bytes as UTF-8
+                    return decodeURIComponent(escape(text));
+                } catch (e) {
+                    // Fallback: latin1 -> utf8 via TextDecoder
+                    try {
+                        const bytes = Uint8Array.from(Array.from(text, c => c.charCodeAt(0) & 0xFF));
+                        return new TextDecoder('utf-8').decode(bytes);
+                    } catch (_) {
+                        return text;
+                    }
+                }
+            } catch (e) { return text; }
+        }
+
         // Global application state
         class ChatApplication {
             constructor() {
@@ -931,8 +953,8 @@
                                             aiMessageDiv.classList.add('streaming');
                                         }
 
-                                        // Decode Unicode escapes in content
-                                        let content = decodeUnicodeEscapes(data.content);
+                                        // Decode Unicode escapes and fix mojibake in content
+                                        let content = fixMojibake(decodeUnicodeEscapes(data.content));
 
                                         // Separate tool results from AI analysis
                                         if (data.tool_result) {
@@ -981,7 +1003,7 @@
                 // Display tool results first
                 if (toolResults.length > 0) {
                     for (let i = 0; i < toolResults.length; i++) {
-                        let toolContent = toolResults[i];
+                        let toolContent = fixMojibake(toolResults[i]);
 
                         // Ensure tables have proper styling
                         if (toolContent.includes('<table')) {
@@ -1002,6 +1024,7 @@
                     formattedAnalysis = formattedAnalysis.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
                     formattedAnalysis = formattedAnalysis.replace(/\*(.*?)\*/g, '<em>$1</em>');
                     formattedAnalysis = formattedAnalysis.replace(/\n/g, '<br>');
+                    formattedAnalysis = fixMojibake(formattedAnalysis);
 
                     if (hasToolResults) {
                         displayContent += `<div class="ai-analysis-section">
