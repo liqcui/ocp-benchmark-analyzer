@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, AsyncGenerator
@@ -17,6 +18,15 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel, Field
+
+# Ensure project root is on sys.path for imports
+try:
+    CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+    PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_DIR))
+    if PROJECT_ROOT not in sys.path:
+        sys.path.insert(0, PROJECT_ROOT)
+except Exception:
+    pass
 
 # MCP and LangGraph imports
 from mcp import ClientSession
@@ -31,7 +41,18 @@ from langgraph.prebuilt import create_react_agent
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.checkpoint.memory import MemorySaver
 from dotenv import load_dotenv
-from elt.utils.analyzer_elt_json2table import convert_json_to_html_table
+
+# Fallback-safe import for HTML conversion utility
+try:
+    from elt.utils.analyzer_elt_json2table import convert_json_to_html_table
+except ImportError:
+    # Fallback: return pretty JSON when converter module not available
+    def convert_json_to_html_table(json_data):
+        try:
+            return json.dumps(json_data, indent=2) if not isinstance(json_data, str) else json_data
+        except Exception:
+            return str(json_data)
+
 import warnings
 # Suppress urllib3 deprecation warning triggered by kubernetes client using HTTPResponse.getheaders()
 warnings.filterwarnings(
