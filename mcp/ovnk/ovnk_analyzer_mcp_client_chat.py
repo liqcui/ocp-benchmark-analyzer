@@ -130,7 +130,7 @@ class MCPTool(BaseTool):
 class MCPClient:
     """MCP Client for interacting with the benchmark server"""
     
-    def __init__(self, mcp_server_url: str = "http://localhost:8002"):
+    def __init__(self, mcp_server_url: str = "http://localhost:8003"):
         self.mcp_server_url = mcp_server_url
         self.session = None
         self.available_tools: List[Dict[str, Any]] = []
@@ -812,7 +812,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "ovnk_analyzer_mcp_client_chat:app",
         host="0.0.0.0",
-        port=8082,
+        port=8083,
         ws="wsproto",
         reload=True,
         log_level="info"

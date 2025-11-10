@@ -5,6 +5,7 @@ ONLY contains node_usage specific logic - no generic utilities
 """
 
 import logging
+import re
 from typing import Dict, Any, List
 import pandas as pd
 from ..utils.analyzer_elt_utility import utilityELT
@@ -46,27 +47,30 @@ class nodeUsageELT(utilityELT):
         }
     
     def extract_node_usage(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Extract node usage information from node_usage.py output"""
+        """Extract node usage information from node_usage.py output
+        
+        Handles new structure with node_groups containing master/infra/workload/worker groups
+        """
         
         # Handle nested data structure
+        # Note: GenericELT._extract_actual_data already unwraps 'data' for node_usage,
+        # so 'data' here should already be the unwrapped content
         actual_data = data
-        if 'data' in data and isinstance(data.get('data'), dict):
+        # Only unwrap if we still have a 'data' key and no 'node_groups' key
+        # (this handles cases where data wasn't pre-unwrapped)
+        if 'data' in data and isinstance(data.get('data'), dict) and 'node_groups' not in data:
             actual_data = data['data']
+        
+        # Log for debugging
+        logger.debug(f"Extracting node usage, actual_data keys: {list(actual_data.keys())}")
+        logger.debug(f"Has node_groups: {'node_groups' in actual_data}")
         
         structured = {
             'overview': [],
             'timestamp': actual_data.get('timestamp', ''),
             'duration': actual_data.get('duration', ''),
-            'time_range': actual_data.get('time_range', {}),
+            'time_range': {},
         }
-        
-        # Extract node_group from query_params if available
-        query_params = actual_data.get('query_params', {})
-        node_group = query_params.get('node_group', 'unknown')
-        
-        # Get nodes list with roles
-        nodes_list = actual_data.get('nodes', [])
-        node_role_map = {node['name']: node.get('role', node_group) for node in nodes_list}
         
         # Initialize role-based tables for each metric
         for role in ['controlplane', 'infra', 'worker', 'workload']:
@@ -76,26 +80,77 @@ class nodeUsageELT(utilityELT):
             structured[f'cgroup_cpu_usage_{role}'] = []
             structured[f'cgroup_rss_usage_{role}'] = []
         
-        metrics = actual_data.get('metrics', {})
+        # Handle new structure with node_groups
+        node_groups = actual_data.get('node_groups', {})
         
-        # Extract each metric type
-        if 'cpu_usage' in metrics:
-            self._extract_cpu_usage(metrics['cpu_usage'], structured, node_role_map)
-        
-        if 'memory_used' in metrics:
-            self._extract_memory_used(metrics['memory_used'], structured, node_role_map)
-        
-        if 'memory_cache_buffer' in metrics:
-            self._extract_memory_cache_buffer(metrics['memory_cache_buffer'], structured, node_role_map)
-        
-        if 'cgroup_cpu_usage' in metrics:
-            self._extract_cgroup_cpu_usage(metrics['cgroup_cpu_usage'], structured, node_role_map)
-        
-        if 'cgroup_rss_usage' in metrics:
-            self._extract_cgroup_rss_usage(metrics['cgroup_rss_usage'], structured, node_role_map)
-        
-        # Generate overview
-        self._generate_overview(actual_data, structured, node_role_map)
+        if node_groups:
+            # Process each node group (master, infra, workload, worker)
+            for group_name, group_data in node_groups.items():
+                if group_data.get('status') != 'success':
+                    # Skip error groups (e.g., "No infra nodes found")
+                    logger.debug(f"Skipping {group_name} group: {group_data.get('error', 'unknown error')}")
+                    continue
+                
+                # Get nodes list with roles for this group
+                nodes_list = group_data.get('nodes', [])
+                node_role_map = {node['name']: node.get('role', group_name) for node in nodes_list}
+                
+                # Update time_range from first successful group
+                if not structured['time_range'] and 'time_range' in group_data:
+                    structured['time_range'] = group_data.get('time_range', {})
+                
+                # Extract metrics from this group
+                metrics = group_data.get('metrics', {})
+                
+                # Extract each metric type
+                if 'cpu_usage' in metrics:
+                    self._extract_cpu_usage(metrics['cpu_usage'], structured, node_role_map)
+                
+                if 'memory_used' in metrics:
+                    self._extract_memory_used(metrics['memory_used'], structured, node_role_map)
+                
+                if 'memory_cache_buffer' in metrics:
+                    self._extract_memory_cache_buffer(metrics['memory_cache_buffer'], structured, node_role_map)
+                
+                if 'cgroup_cpu_usage' in metrics:
+                    self._extract_cgroup_cpu_usage(metrics['cgroup_cpu_usage'], structured, node_role_map)
+                
+                if 'cgroup_rss_usage' in metrics:
+                    self._extract_cgroup_rss_usage(metrics['cgroup_rss_usage'], structured, node_role_map)
+            
+            # Generate overview from all node groups
+            self._generate_overview_from_groups(node_groups, structured)
+        else:
+            # Fallback to old structure (single node group)
+            query_params = actual_data.get('query_params', {})
+            node_group = query_params.get('node_group', 'unknown')
+            
+            # Get nodes list with roles
+            nodes_list = actual_data.get('nodes', [])
+            node_role_map = {node['name']: node.get('role', node_group) for node in nodes_list}
+            
+            structured['time_range'] = actual_data.get('time_range', {})
+            
+            metrics = actual_data.get('metrics', {})
+            
+            # Extract each metric type
+            if 'cpu_usage' in metrics:
+                self._extract_cpu_usage(metrics['cpu_usage'], structured, node_role_map)
+            
+            if 'memory_used' in metrics:
+                self._extract_memory_used(metrics['memory_used'], structured, node_role_map)
+            
+            if 'memory_cache_buffer' in metrics:
+                self._extract_memory_cache_buffer(metrics['memory_cache_buffer'], structured, node_role_map)
+            
+            if 'cgroup_cpu_usage' in metrics:
+                self._extract_cgroup_cpu_usage(metrics['cgroup_cpu_usage'], structured, node_role_map)
+            
+            if 'cgroup_rss_usage' in metrics:
+                self._extract_cgroup_rss_usage(metrics['cgroup_rss_usage'], structured, node_role_map)
+            
+            # Generate overview
+            self._generate_overview(actual_data, structured, node_role_map)
         
         return structured
     
@@ -357,10 +412,50 @@ class nodeUsageELT(utilityELT):
                     'Max': f'<strong>{self._format_memory_gb(max_val, is_top=is_top)}</strong>'
                 })
     
+    def _generate_overview_from_groups(self, node_groups: Dict[str, Any], 
+                                      structured: Dict[str, Any]):
+        """Generate node usage overview from node_groups structure"""
+        role_counts = {}
+        total_metrics_collected = 0
+        
+        for group_name, group_data in node_groups.items():
+            if group_data.get('status') != 'success':
+                continue
+            
+            nodes_list = group_data.get('nodes', [])
+            metrics = group_data.get('metrics', {})
+            metrics_collected = len([k for k in metrics.keys() if metrics[k].get('status') == 'success'])
+            total_metrics_collected = max(total_metrics_collected, metrics_collected)
+            
+            for node in nodes_list:
+                role = node.get('role', group_name)
+                role_counts[role] = role_counts.get(role, 0) + 1
+        
+        # Add top workers info if available
+        worker_group = node_groups.get('worker', {})
+        if worker_group.get('status') == 'success' and 'top_workers' in worker_group:
+            top_workers = worker_group.get('top_workers', {})
+            top_workers_count = top_workers.get('count', 0)
+            if top_workers_count > 0:
+                structured['overview'].append({
+                    'Role': 'Top Workers',
+                    'Nodes': f"{top_workers_count} (by CPU)",
+                    'Metrics Collected': total_metrics_collected,
+                    'Status': self.create_status_badge('success', 'Active')
+                })
+        
+        for role, count in sorted(role_counts.items()):
+            structured['overview'].append({
+                'Role': role.title(),
+                'Nodes': count,
+                'Metrics Collected': total_metrics_collected,
+                'Status': self.create_status_badge('success', 'Active')
+            })
+    
     def _generate_overview(self, data: Dict[str, Any], 
                           structured: Dict[str, Any],
                           node_role_map: Dict[str, str]):
-        """Generate node usage overview"""
+        """Generate node usage overview (legacy single group structure)"""
         # Count nodes by role
         role_counts = {}
         for node_name, role in node_role_map.items():
@@ -427,7 +522,18 @@ class nodeUsageELT(utilityELT):
             
             overview_data = data.get('overview', [])
             
-            total_nodes = sum(int(item.get('Nodes', 0)) for item in overview_data)
+            # Calculate total nodes (handle both numeric and string values like "1 (by CPU)")
+            total_nodes = 0
+            for item in overview_data:
+                nodes_value = item.get('Nodes', 0)
+                if isinstance(nodes_value, str):
+                    # Extract number from strings like "1 (by CPU)"
+                    match = re.search(r'(\d+)', str(nodes_value))
+                    if match:
+                        total_nodes += int(match.group(1))
+                else:
+                    total_nodes += int(nodes_value)
+            
             if total_nodes > 0:
                 summary_items.append(f"<li>Total Nodes: {total_nodes}</li>")
             
@@ -436,7 +542,7 @@ class nodeUsageELT(utilityELT):
                 role = item.get('Role', 'Unknown')
                 nodes = item.get('Nodes', 0)
                 metrics = item.get('Metrics Collected', 0)
-                if nodes > 0:
+                if isinstance(nodes, str) or (isinstance(nodes, (int, float)) and nodes > 0):
                     summary_items.append(f"<li>{role}: {nodes} nodes, {metrics} metrics</li>")
             
             # Time range
@@ -444,6 +550,8 @@ class nodeUsageELT(utilityELT):
             if time_range:
                 duration = data.get('duration', 'unknown')
                 summary_items.append(f"<li>Duration: {duration}</li>")
+                if 'start' in time_range and 'end' in time_range:
+                    summary_items.append(f"<li>Time Range: {time_range.get('start')} to {time_range.get('end')}</li>")
             
             return (
                 "<div class=\"node-usage-summary\">"

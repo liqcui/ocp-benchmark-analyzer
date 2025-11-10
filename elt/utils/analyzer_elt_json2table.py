@@ -347,6 +347,9 @@ class GenericELT(utilityELT):
             inner = data['data']
             if 'category' in inner and inner.get('category') == 'node_usage':
                 return True
+            # Check for node_groups structure (new format)
+            if 'node_groups' in inner and isinstance(inner.get('node_groups'), dict):
+                return True
             # Check for metrics with node usage indicators
             metrics = inner.get('metrics', {})
             if isinstance(metrics, dict):
@@ -357,6 +360,10 @@ class GenericELT(utilityELT):
         if 'metrics' in data and isinstance(data.get('metrics'), dict):
             if any(k in data['metrics'] for k in ['cpu_usage', 'memory_used', 'cgroup_cpu_usage', 'cgroup_rss_usage']):
                 return True
+        
+        # Check for node_groups at top level (new format)
+        if 'node_groups' in data and isinstance(data.get('node_groups'), dict):
+            return True
         
         # Check for node_group in query_params
         if 'query_params' in data and isinstance(data.get('query_params'), dict):

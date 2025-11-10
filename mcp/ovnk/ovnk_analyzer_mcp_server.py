@@ -61,6 +61,8 @@ try:
     from tools.net.network_io import NetworkIOCollector
     from tools.utils.promql_basequery import PrometheusBaseQuery
     from config.metrics_config_reader import Config
+    from tools.node.node_usage import nodeUsageCollector
+
 except ImportError as e:
     logger.error(f"Failed to import local modules: {e}")
     logger.error("Please ensure all modules are in the correct directory structure")
@@ -137,7 +139,7 @@ pods_collector = None
 api_collector = None
 cluster_info_collector = None
 network_collector = None
-
+node_usage_collector = None
 
 async def initialize_collectors():
     """Initialize all collectors with authentication"""
@@ -226,7 +228,6 @@ async def initialize_collectors():
         logger.error(f"❌ Failed to initialize collectors: {e}")
         logger.error("=" * 70)
         return False
-
 
 @mcp.tool()
 async def get_server_health() -> MetricResponse:
@@ -327,7 +328,157 @@ async def get_cluster_info(request: ClusterInfoRequest | None = None) -> MetricR
         )
 
 @mcp.tool()
-async def get_ovn_database_summary(request: TimeRangeInput | None = None) -> MetricResponse:
+async def get_ocp_node_usage(request: DurationInput | None = None) -> MetricResponse:
+    """
+    Get comprehensive node usage metrics for OpenShift cluster nodes.
+    
+    Monitors resource utilization metrics at the node and cgroup level for:
+    - Master/Control Plane nodes (all nodes)
+    - Infra nodes (all nodes)
+    - Workload nodes (all nodes)
+    - Worker nodes (top 3 by CPU usage)
+    
+    Metrics collected for each node group:
+    - Node CPU usage by mode (user, system, idle, iowait, etc.)
+    - Node memory used (active memory consumption)
+    - Node memory cache and buffer (filesystem cache and buffers)
+    - Cgroup CPU usage (CPU consumption per control group)
+    - Cgroup RSS usage (Resident Set Size memory per control group)
+    
+    These metrics provide insights into:
+    - Overall node resource utilization and capacity across all node roles
+    - CPU contention and workload distribution patterns
+    - Memory pressure and caching efficiency
+    - Container-level resource consumption via cgroups
+    - Potential resource bottlenecks affecting cluster performance
+    
+    Args:
+        request: DurationInput with duration field. Examples: '15m', '30m', '1h', '2h', '6h', '12h', '1d'
+    
+    Returns:
+        MetricResponse: Node usage metrics organized by node role (master/infra/workload/worker) with top 3 worker nodes
+    """
+    try:
+        if request is None:
+            request = DurationInput()
+        
+        duration = request.duration
+        
+        global auth_manager, node_usage_collector
+        if not node_usage_collector:
+            # Lazy initialize if startup initialization didn't complete
+            if auth_manager is None:
+                auth_manager = OpenShiftAuth(config.kubeconfig_path if config else None)
+                try:
+                    await auth_manager.initialize()
+                except Exception:
+                    return MetricResponse(
+                        status="error",
+                        error="Failed to initialize OpenShift auth for node usage",
+                        timestamp=datetime.now(pytz.UTC).isoformat(),
+                        duration=duration
+                    )
+            try:
+                prometheus_config = {
+                    'url': auth_manager.prometheus_url,
+                    'token': getattr(auth_manager, 'prometheus_token', None),
+                    'verify_ssl': False
+                }
+                node_usage_collector = nodeUsageCollector(auth_manager, prometheus_config)
+            except Exception as e:
+                return MetricResponse(
+                    status="error",
+                    error=f"Failed to initialize nodeUsageCollector: {e}",
+                    timestamp=datetime.now(pytz.UTC).isoformat(),
+                    duration=duration
+                )
+        
+        # Collect metrics for master/infra/workload nodes and top 3 worker nodes
+        combined_results = {
+            'status': 'success',
+            'timestamp': datetime.now(pytz.UTC).isoformat(),
+            'duration': duration,
+            'node_groups': {}
+        }
+        
+        # Query master/controlplane nodes
+        try:
+            master_result = await node_usage_collector.collect_all_metrics(node_group='master', duration=duration)
+            if master_result.get('status') == 'success':
+                combined_results['node_groups']['master'] = master_result
+            else:
+                combined_results['node_groups']['master'] = {'status': 'error', 'error': master_result.get('error')}
+        except Exception as e:
+            logger.error(f"Error collecting master node metrics: {e}")
+            combined_results['node_groups']['master'] = {'status': 'error', 'error': str(e)}
+        
+        # Query infra nodes
+        try:
+            infra_result = await node_usage_collector.collect_all_metrics(node_group='infra', duration=duration)
+            if infra_result.get('status') == 'success':
+                combined_results['node_groups']['infra'] = infra_result
+            else:
+                combined_results['node_groups']['infra'] = {'status': 'error', 'error': infra_result.get('error')}
+        except Exception as e:
+            logger.error(f"Error collecting infra node metrics: {e}")
+            combined_results['node_groups']['infra'] = {'status': 'error', 'error': str(e)}
+        
+        # Query workload nodes
+        try:
+            workload_result = await node_usage_collector.collect_all_metrics(node_group='workload', duration=duration)
+            if workload_result.get('status') == 'success':
+                combined_results['node_groups']['workload'] = workload_result
+            else:
+                combined_results['node_groups']['workload'] = {'status': 'error', 'error': workload_result.get('error')}
+        except Exception as e:
+            logger.error(f"Error collecting workload node metrics: {e}")
+            combined_results['node_groups']['workload'] = {'status': 'error', 'error': str(e)}
+        
+        # Query worker nodes (top 3)
+        try:
+            worker_result = await node_usage_collector.collect_all_metrics(node_group='worker', duration=duration, top_n_workers=3)
+            if worker_result.get('status') == 'success':
+                combined_results['node_groups']['worker'] = worker_result
+            else:
+                combined_results['node_groups']['worker'] = {'status': 'error', 'error': worker_result.get('error')}
+        except Exception as e:
+            logger.error(f"Error collecting worker node metrics: {e}")
+            combined_results['node_groups']['worker'] = {'status': 'error', 'error': str(e)}
+        
+        # Determine overall status
+        successful_groups = sum(1 for group in combined_results['node_groups'].values() if group.get('status') == 'success')
+        total_groups = len(combined_results['node_groups'])
+        
+        if successful_groups == 0:
+            combined_results['status'] = 'error'
+            combined_results['error'] = 'All node group queries failed'
+        elif successful_groups < total_groups:
+            combined_results['status'] = 'partial'
+        else:
+            combined_results['status'] = 'success'
+        
+        return MetricResponse(
+            status=combined_results.get('status', 'unknown'),
+            data=combined_results,
+            error=combined_results.get('error'),
+            timestamp=combined_results.get('timestamp', datetime.now(pytz.UTC).isoformat()),
+            category="node_usage",
+            duration=duration
+        )
+        
+    except Exception as e:
+        logger.error(f"Error collecting node usage metrics: {e}")
+        return MetricResponse(
+            status="error",
+            error=str(e),
+            timestamp=datetime.now(pytz.UTC).isoformat(),
+            category="node_usage",
+            duration=duration
+        )
+
+
+@mcp.tool()
+async def get_ovn_database_info(request: TimeRangeInput | None = None) -> MetricResponse:
     """
     Get cluster-wide OVN database size summary with health recommendations.
     
@@ -848,7 +999,7 @@ def main():
             # Optional MCP Inspector launch
             enable_inspector = os.environ.get("ENABLE_MCP_INSPECTOR", "").lower() in ("1", "true", "yes", "on")
             host = "0.0.0.0"
-            port = 8002
+            port = 8003
 
             if enable_inspector:
                 def start_mcp_inspector(url: str):
