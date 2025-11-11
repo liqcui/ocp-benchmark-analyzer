@@ -152,6 +152,18 @@ class generalInfoELT(utilityELT):
         
         return structured
     
+    def _infer_role(self, node_name: str, pod_name: str = '') -> str:
+        """Infer node role from node name or pod name"""
+        name_to_check = (node_name or pod_name or '').lower()
+        if 'master' in name_to_check or 'control' in name_to_check:
+            return 'controlplane'
+        elif 'infra' in name_to_check:
+            return 'infra'
+        elif 'workload' in name_to_check:
+            return 'workload'
+        else:
+            return 'worker'
+    
     def _extract_pod_metric(self, metric_name: str, metric_data: Dict[str, Any], 
                            structured: Dict[str, Any]):
         """Extract pod-level metric"""
@@ -192,10 +204,14 @@ class generalInfoELT(utilityELT):
                 max_val, metric_name, unit, is_top=is_top
             )
             
+            node_name = pod_stats.get('node', 'unknown')
+            role = self._infer_role(node_name, pod_name)
+            
             structured[table_key].append({
+                'Metric Name': title,
+                'Role': role.title(),
                 'Pod': self.truncate_text(pod_name, max_length=60),
-                'Node': self.truncate_node_name(pod_stats.get('node', 'unknown')),
-                'Metric': title,
+                'Node': self.truncate_node_name(node_name),
                 'Avg': avg_display,
                 'Max': max_display,
                 'Count': pod_stats.get('count', 0)
@@ -241,9 +257,12 @@ class generalInfoELT(utilityELT):
                 max_val, metric_name, unit, is_top=is_top
             )
             
+            role = self._infer_role(node_name)
+            
             structured[table_key].append({
+                'Metric Name': title,
+                'Role': role.title(),
                 'Node': self.truncate_node_name(node_name),
-                'Metric': title,
                 'Avg': avg_display,
                 'Max': max_display,
                 'Count': node_stats.get('count', 0)
@@ -279,6 +298,7 @@ class generalInfoELT(utilityELT):
                 value_display = str(int(max_value))
             
             structured[table_key].append({
+                'Metric Name': title,
                 'Rank': idx + 1,
                 'Resource Name': resource_name,
                 'Max Objects': value_display

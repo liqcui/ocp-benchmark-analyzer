@@ -161,6 +161,8 @@ class backendCommitELT(utilityELT):
                 latest_ms = pod_metrics.get('latest', 0) * 1000
                 
                 structured[table_key].append({
+                    'Metric Name': self.metric_configs['disk_backend_commit_duration_seconds_p99']['title'],
+                    'Role': role.title(),
                     'Pod': self.truncate_node_name(pod_name, 30),
                     'Avg Latency': self._format_and_highlight_latency(avg_ms, thresholds),
                     'Max Latency': self._format_and_highlight_latency(max_ms, thresholds, is_top),
@@ -200,6 +202,8 @@ class backendCommitELT(utilityELT):
                     max_display = f'<span class="text-primary font-weight-bold bg-light px-1">🏆 {max_display}</span>'
                 
                 structured[table_key].append({
+                    'Metric Name': self.metric_configs['disk_backend_commit_duration_sum_rate']['title'],
+                    'Role': role.title(),
                     'Pod': self.truncate_node_name(pod_name, 30),
                     'Avg Rate': avg_display,
                     'Max Rate': max_display,
@@ -238,6 +242,8 @@ class backendCommitELT(utilityELT):
                     latest_display = f'<span class="text-primary font-weight-bold bg-light px-1">🏆 {latest_display}</span>'
                 
                 structured[table_key].append({
+                    'Metric Name': self.metric_configs['disk_backend_commit_duration_sum']['title'],
+                    'Role': role.title(),
                     'Pod': self.truncate_node_name(pod_name, 30),
                     'Total Duration': latest_display,
                     'Avg Duration': f"{pod_metrics.get('avg', 0):.2f} s",
@@ -275,6 +281,8 @@ class backendCommitELT(utilityELT):
                     max_display = f'<span class="text-primary font-weight-bold bg-light px-1">🏆 {max_display}</span>'
                 
                 structured[table_key].append({
+                    'Metric Name': self.metric_configs['disk_backend_commit_duration_count_rate']['title'],
+                    'Role': role.title(),
                     'Pod': self.truncate_node_name(pod_name, 30),
                     'Avg Rate': self.format_operations_per_second(pod_metrics.get('avg', 0)),
                     'Max Rate': max_display,
@@ -313,6 +321,8 @@ class backendCommitELT(utilityELT):
                     latest_display = f'<span class="text-primary font-weight-bold bg-light px-1">🏆 {latest_display}</span>'
                 
                 structured[table_key].append({
+                    'Metric Name': self.metric_configs['disk_backend_commit_duration_count']['title'],
+                    'Role': role.title(),
                     'Pod': self.truncate_node_name(pod_name, 30),
                     'Total Operations': latest_display,
                     'Avg Operations': self.format_count_value(pod_metrics.get('avg', 0)),

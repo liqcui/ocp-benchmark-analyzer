@@ -173,6 +173,8 @@ class diskIOELT(utilityELT):
             max_display = self.format_bytes_per_second(max_val)
             
             structured[table_key].append({
+                'Metric Name': self.metric_configs['disk_io_container_disk_writes']['title'],
+                'Role': role.title(),
                 'Node': self.truncate_node_name(node_name),
                 'Avg Writes': avg_display,
                 'Max Writes': max_display
@@ -209,6 +211,8 @@ class diskIOELT(utilityELT):
             devices_str = ', '.join(devices) if devices else 'All'
             
             structured[table_key].append({
+                'Metric Name': self.metric_configs['disk_io_node_disk_throughput_read']['title'],
+                'Role': role.title(),
                 'Node': self.truncate_node_name(node_name),
                 'Devices': devices_str,
                 'Avg Read': avg_display,
@@ -246,6 +250,8 @@ class diskIOELT(utilityELT):
             devices_str = ', '.join(devices) if devices else 'All'
             
             structured[table_key].append({
+                'Metric Name': self.metric_configs['disk_io_node_disk_throughput_write']['title'],
+                'Role': role.title(),
                 'Node': self.truncate_node_name(node_name),
                 'Devices': devices_str,
                 'Avg Write': avg_display,
@@ -283,6 +289,8 @@ class diskIOELT(utilityELT):
             devices_str = ', '.join(devices) if devices else 'All'
             
             structured[table_key].append({
+                'Metric Name': self.metric_configs['disk_io_node_disk_iops_read']['title'],
+                'Role': role.title(),
                 'Node': self.truncate_node_name(node_name),
                 'Devices': devices_str,
                 'Avg Read IOPS': avg_display,
@@ -320,6 +328,8 @@ class diskIOELT(utilityELT):
             devices_str = ', '.join(devices) if devices else 'All'
             
             structured[table_key].append({
+                'Metric Name': self.metric_configs['disk_io_node_disk_iops_write']['title'],
+                'Role': role.title(),
                 'Node': self.truncate_node_name(node_name),
                 'Devices': devices_str,
                 'Avg Write IOPS': avg_display,
@@ -355,6 +365,8 @@ class diskIOELT(utilityELT):
             devices_str = ', '.join(devices) if devices else 'All'
             
             structured[table_key].append({
+                'Metric Name': self.metric_configs['disk_io_node_disk_read_time_seconds']['title'],
+                'Role': role.title(),
                 'Node': self.truncate_node_name(node_name),
                 'Devices': devices_str,
                 'Avg Read Latency': avg_display,
@@ -390,6 +402,8 @@ class diskIOELT(utilityELT):
             devices_str = ', '.join(devices) if devices else 'All'
             
             structured[table_key].append({
+                'Metric Name': self.metric_configs['disk_io_node_disk_writes_time_seconds']['title'],
+                'Role': role.title(),
                 'Node': self.truncate_node_name(node_name),
                 'Devices': devices_str,
                 'Avg Write Latency': avg_display,
@@ -425,6 +439,8 @@ class diskIOELT(utilityELT):
             devices_str = ', '.join(devices) if devices else 'All'
             
             structured[table_key].append({
+                'Metric Name': self.metric_configs['disk_io_node_disk_io_time_seconds']['title'],
+                'Role': role.title(),
                 'Node': self.truncate_node_name(node_name),
                 'Devices': devices_str,
                 'Avg I/O Time': avg_display,

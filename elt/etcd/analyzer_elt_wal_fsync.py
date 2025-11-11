@@ -340,20 +340,21 @@ class diskWalFsyncELT(utilityELT):
                     # Build dataframe based on metric type
                     df_data = []
                     top_indices = metric_info.get('top_values', [])
+                    metric_title = metric_info.get('title', metric_name.replace('_', ' ').title())
                     
                     for idx, pod_stat in enumerate(pod_data):
                         is_top = idx in top_indices
                         
                         if metric_name == 'disk_wal_fsync_seconds_duration_p99':
-                            df_data.append(self._format_p99_row(pod_stat, is_top))
+                            df_data.append(self._format_p99_row(pod_stat, is_top, metric_title, role))
                         elif metric_name == 'disk_wal_fsync_duration_seconds_sum_rate':
-                            df_data.append(self._format_sum_rate_row(pod_stat, is_top))
+                            df_data.append(self._format_sum_rate_row(pod_stat, is_top, metric_title, role))
                         elif metric_name == 'disk_wal_fsync_duration_sum':
-                            df_data.append(self._format_sum_row(pod_stat, is_top))
+                            df_data.append(self._format_sum_row(pod_stat, is_top, metric_title, role))
                         elif metric_name == 'disk_wal_fsync_duration_seconds_count_rate':
-                            df_data.append(self._format_count_rate_row(pod_stat, is_top))
+                            df_data.append(self._format_count_rate_row(pod_stat, is_top, metric_title, role))
                         elif metric_name == 'disk_wal_fsync_duration_seconds_count':
-                            df_data.append(self._format_count_row(pod_stat, is_top))
+                            df_data.append(self._format_count_row(pod_stat, is_top, metric_title, role))
                     
                     if df_data:
                         table_name = f"{role}_{metric_name}"
@@ -365,11 +366,13 @@ class diskWalFsyncELT(utilityELT):
             logger.error(f"Failed to transform WAL fsync data to DataFrames: {e}")
             return {}
 
-    def _format_p99_row(self, pod_stat: Dict[str, Any], is_top: bool) -> Dict[str, str]:
+    def _format_p99_row(self, pod_stat: Dict[str, Any], is_top: bool, metric_title: str, role: str) -> Dict[str, str]:
         """Format P99 latency row with highlighting"""
         thresholds = {'critical': 100, 'warning': 50}  # in milliseconds
         
         return {
+            'Metric Name': metric_title,
+            'Role': role.title(),
             'Pod': self.truncate_text(pod_stat['pod'], 45),
             'Avg Latency': self.highlight_latency_value(pod_stat['avg_seconds'] * 1000, is_top),
             'Max Latency': self.highlight_latency_value(pod_stat['max_seconds'] * 1000, is_top),
@@ -378,9 +381,11 @@ class diskWalFsyncELT(utilityELT):
             'Data Points': str(pod_stat['data_points'])
         }
 
-    def _format_sum_rate_row(self, pod_stat: Dict[str, Any], is_top: bool) -> Dict[str, str]:
+    def _format_sum_rate_row(self, pod_stat: Dict[str, Any], is_top: bool, metric_title: str, role: str) -> Dict[str, str]:
         """Format duration sum rate row"""
         return {
+            'Metric Name': metric_title,
+            'Role': role.title(),
             'Pod': self.truncate_text(pod_stat['pod'], 45),
             'Avg Rate': f"{pod_stat['avg_rate_seconds']:.6f} s/s",
             'Max Rate': f"{pod_stat['max_rate_seconds']:.6f} s/s" + (' 🏆' if is_top else ''),
@@ -389,9 +394,11 @@ class diskWalFsyncELT(utilityELT):
             'Data Points': str(pod_stat['data_points'])
         }
 
-    def _format_sum_row(self, pod_stat: Dict[str, Any], is_top: bool) -> Dict[str, str]:
+    def _format_sum_row(self, pod_stat: Dict[str, Any], is_top: bool, metric_title: str, role: str) -> Dict[str, str]:
         """Format cumulative duration sum row"""
         return {
+            'Metric Name': metric_title,
+            'Role': role.title(),
             'Pod': self.truncate_text(pod_stat['pod'], 45),
             'Avg Sum': f"{pod_stat['avg_sum_seconds']:.6f} s",
             'Max Sum': f"{pod_stat['max_sum_seconds']:.6f} s" + (' 🏆' if is_top else ''),
@@ -400,9 +407,11 @@ class diskWalFsyncELT(utilityELT):
             'Data Points': str(pod_stat['data_points'])
         }
 
-    def _format_count_rate_row(self, pod_stat: Dict[str, Any], is_top: bool) -> Dict[str, str]:
+    def _format_count_rate_row(self, pod_stat: Dict[str, Any], is_top: bool, metric_title: str, role: str) -> Dict[str, str]:
         """Format operations rate row"""
         return {
+            'Metric Name': metric_title,
+            'Role': role.title(),
             'Pod': self.truncate_text(pod_stat['pod'], 45),
             'Avg Ops/sec': f"{pod_stat['avg_ops_per_sec']:.3f}",
             'Max Ops/sec': f"{pod_stat['max_ops_per_sec']:.3f}" + (' 🏆' if is_top else ''),
@@ -411,9 +420,11 @@ class diskWalFsyncELT(utilityELT):
             'Data Points': str(pod_stat['data_points'])
         }
 
-    def _format_count_row(self, pod_stat: Dict[str, Any], is_top: bool) -> Dict[str, str]:
+    def _format_count_row(self, pod_stat: Dict[str, Any], is_top: bool, metric_title: str, role: str) -> Dict[str, str]:
         """Format total operations count row"""
         return {
+            'Metric Name': metric_title,
+            'Role': role.title(),
             'Pod': self.truncate_text(pod_stat['pod'], 45),
             'Avg Count': self.format_count_value(pod_stat['avg_count']),
             'Max Count': self.format_count_value(pod_stat['max_count']) + (' 🏆' if is_top else ''),

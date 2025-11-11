@@ -98,6 +98,18 @@ class compactDefragELT(utilityELT):
         
         return structured
     
+    def _infer_role(self, node_name: str, pod_name: str = '') -> str:
+        """Infer node role from node name or pod name"""
+        name_to_check = (node_name or pod_name or '').lower()
+        if 'master' in name_to_check or 'control' in name_to_check:
+            return 'controlplane'
+        elif 'infra' in name_to_check:
+            return 'infra'
+        elif 'workload' in name_to_check:
+            return 'workload'
+        else:
+            return 'worker'
+    
     def _extract_compacted_keys(self, metric_info: Dict[str, Any], 
                                 structured: Dict[str, Any]):
         """Extract compacted keys metric"""
@@ -126,9 +138,14 @@ class compactDefragELT(utilityELT):
                 pod_info.get('max', 0), thresholds, ''
             )
             
+            node_name = pod_info.get('node', 'unknown')
+            role = self._infer_role(node_name, pod_name)
+            
             structured['compacted_keys'].append({
+                'Metric Name': self.metric_configs['debugging_mvcc_db_compacted_keys']['title'],
+                'Role': role.title(),
                 'Pod': self.truncate_node_name(pod_name, 30),
-                'Node': self.truncate_node_name(pod_info.get('node', 'unknown'), 25),
+                'Node': self.truncate_node_name(node_name, 25),
                 'Average': avg_display,
                 'Maximum': max_display,
                 'Latest': int(pod_info.get('latest', 0))
@@ -162,9 +179,14 @@ class compactDefragELT(utilityELT):
                 pod_info.get('max', 0), 'milliseconds', thresholds
             )
             
+            node_name = pod_info.get('node', 'unknown')
+            role = self._infer_role(node_name, pod_name)
+            
             structured['compaction_rate'].append({
+                'Metric Name': self.metric_configs['debugging_mvcc_db_compaction_duration_sum_delta']['title'],
+                'Role': role.title(),
                 'Pod': self.truncate_node_name(pod_name, 30),
-                'Node': self.truncate_node_name(pod_info.get('node', 'unknown'), 25),
+                'Node': self.truncate_node_name(node_name, 25),
                 'Average': avg_display,
                 'Maximum': max_display,
                 'Latest': self.format_value_with_unit(pod_info.get('latest', 0), 'milliseconds')
@@ -198,9 +220,14 @@ class compactDefragELT(utilityELT):
                 pod_info.get('max', 0), 'milliseconds', thresholds
             )
             
+            node_name = pod_info.get('node', 'unknown')
+            role = self._infer_role(node_name, pod_name)
+            
             structured['compaction_duration'].append({
+                'Metric Name': self.metric_configs['debugging_mvcc_db_compaction_duration_sum']['title'],
+                'Role': role.title(),
                 'Pod': self.truncate_node_name(pod_name, 30),
-                'Node': self.truncate_node_name(pod_info.get('node', 'unknown'), 25),
+                'Node': self.truncate_node_name(node_name, 25),
                 'Average': avg_display,
                 'Maximum': max_display,
                 'Latest': self.format_value_with_unit(pod_info.get('latest', 0), 'milliseconds')
@@ -234,9 +261,14 @@ class compactDefragELT(utilityELT):
                 pod_info.get('max', 0), 'seconds', thresholds
             )
             
+            node_name = pod_info.get('node', 'unknown')
+            role = self._infer_role(node_name, pod_name)
+            
             structured['snapshot_duration'].append({
+                'Metric Name': self.metric_configs['debugging_snapshot_duration']['title'],
+                'Role': role.title(),
                 'Pod': self.truncate_node_name(pod_name, 30),
-                'Node': self.truncate_node_name(pod_info.get('node', 'unknown'), 25),
+                'Node': self.truncate_node_name(node_name, 25),
                 'Average': avg_display,
                 'Maximum': max_display,
                 'Latest': self.format_value_with_unit(pod_info.get('latest', 0), 'seconds')
@@ -270,9 +302,14 @@ class compactDefragELT(utilityELT):
                 pod_info.get('max', 0), 'seconds', thresholds
             )
             
+            node_name = pod_info.get('node', 'unknown')
+            role = self._infer_role(node_name, pod_name)
+            
             structured['defrag_rate'].append({
+                'Metric Name': self.metric_configs['disk_backend_defrag_duration_sum_rate']['title'],
+                'Role': role.title(),
                 'Pod': self.truncate_node_name(pod_name, 30),
-                'Node': self.truncate_node_name(pod_info.get('node', 'unknown'), 25),
+                'Node': self.truncate_node_name(node_name, 25),
                 'Average': avg_display,
                 'Maximum': max_display,
                 'Latest': self.format_value_with_unit(pod_info.get('latest', 0), 'seconds')
@@ -306,9 +343,14 @@ class compactDefragELT(utilityELT):
                 pod_info.get('max', 0), 'seconds', thresholds
             )
             
+            node_name = pod_info.get('node', 'unknown')
+            role = self._infer_role(node_name, pod_name)
+            
             structured['defrag_duration'].append({
+                'Metric Name': self.metric_configs['disk_backend_defrag_duration_sum']['title'],
+                'Role': role.title(),
                 'Pod': self.truncate_node_name(pod_name, 30),
-                'Node': self.truncate_node_name(pod_info.get('node', 'unknown'), 25),
+                'Node': self.truncate_node_name(node_name, 25),
                 'Average': avg_display,
                 'Maximum': max_display,
                 'Latest': self.format_value_with_unit(pod_info.get('latest', 0), 'seconds')
