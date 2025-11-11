@@ -148,7 +148,8 @@ class networkIOELT(utilityELT):
                 is_top = (max_val == top_max and max_val > 0)
                 
                 structured[table_key].append({
-                    'Metric': config.get('title', metric_name),
+                    'Metric Name': config.get('title', metric_name),
+                    'Role': role.title(),
                     'Node': self.truncate_node_name(node_name),
                     'Avg': self.format_and_highlight(avg_val, unit, thresholds, False),
                     'Max': self.format_and_highlight(max_val, unit, thresholds, is_top),
@@ -175,7 +176,8 @@ class networkIOELT(utilityELT):
                 is_top = (max_val == top_max and max_val > 0)
                 
                 structured[table_key].append({
-                    'Metric': config.get('title', metric_name),
+                    'Metric Name': config.get('title', metric_name),
+                    'Role': role.title(),
                     'Node': self.truncate_node_name(node_name),
                     'Avg': self.format_and_highlight(avg_val, unit, thresholds, False),
                     'Max': self.format_and_highlight(max_val, unit, thresholds, is_top),

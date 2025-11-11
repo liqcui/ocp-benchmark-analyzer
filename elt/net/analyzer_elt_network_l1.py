@@ -161,6 +161,8 @@ class networkL1ELT(utilityELT):
             interfaces = node_data.get('interfaces', {})
             for device, status in interfaces.items():
                 structured[table_key].append({
+                    'Metric Name': self.metric_configs['network_l1_node_network_up']['title'],
+                    'Role': role.title(),
                     'Node': self.truncate_node_name(node_name),
                     'Interface': device,
                     'Status': self.format_status(status)
@@ -176,6 +178,8 @@ class networkL1ELT(utilityELT):
             interfaces = node_data.get('interfaces', {})
             for device, status in interfaces.items():
                 structured[table_key].append({
+                    'Metric Name': self.metric_configs['network_l1_node_traffic_carrier']['title'],
+                    'Role': role.title(),
                     'Node': self.truncate_node_name(node_name),
                     'Interface': device,
                     'Carrier': self.format_status(status)
@@ -215,6 +219,8 @@ class networkL1ELT(utilityELT):
             max_speed_readable = self.format_network_speed(max_speed)
             
             structured[table_key].append({
+                'Metric Name': self.metric_configs['network_l1_node_network_speed_bytes']['title'],
+                'Role': role.title(),
                 'Node': self.truncate_node_name(node_name),
                 'Interface': device,
                 'Speed': speed_display,
@@ -255,6 +261,8 @@ class networkL1ELT(utilityELT):
             max_mtu_readable = self.format_mtu_bytes(max_mtu)
             
             structured[table_key].append({
+                'Metric Name': self.metric_configs['network_l1_node_network_mtu_bytes']['title'],
+                'Role': role.title(),
                 'Node': self.truncate_node_name(node_name),
                 'Interface': device,
                 'MTU': mtu_display,
@@ -307,6 +315,8 @@ class networkL1ELT(utilityELT):
                 max_display = str(int(max_val))
             
             structured[table_key].append({
+                'Metric Name': self.metric_configs['network_l1_node_arp_entries']['title'],
+                'Role': role.title(),
                 'Node': self.truncate_node_name(node_name),
                 'Interface': device,
                 'Avg Entries': avg_display,

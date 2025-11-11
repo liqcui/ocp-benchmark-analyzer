@@ -178,7 +178,8 @@ class networkNetstatUDPELT(utilityELT):
             max_display = self.format_value_with_unit(max_val, unit)
             
             structured[table_key].append({
-                'Metric': metric_config.get('title', metric_name),
+                'Metric Name': metric_config.get('title', metric_name),
+                'Role': role.title(),
                 'Node': self.truncate_node_name(node_name),
                 'Value': value_display,
                 'Avg': avg_display,
