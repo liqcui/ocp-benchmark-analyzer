@@ -234,9 +234,42 @@ class socketStatTCPCollector:
         for nv_key in other_keys:
             normalized_node_values[nv_key] = node_values[nv_key]
         
-        # Replace node_values with normalized version
-        node_values = normalized_node_values
-        logger.info(f"After normalization: {len(node_values)} unique nodes")
+        # Build a set of all full node names for filtering (only full names, no short names)
+        all_full_node_names = set()
+        for role, nodes_info in node_groups.items():
+            for node_info in nodes_info:
+                full_name = node_info['name']
+                all_full_node_names.add(full_name)
+                all_full_node_names.add(full_name.lower())
+        
+        # Final filtering: remove any short name keys that have been mapped to full names
+        # Only keep keys that are full names (exist in node_groups)
+        final_node_values = {}
+        for nv_key, nv_values in normalized_node_values.items():
+            # Check if this is a full name (exists in node_groups)
+            is_full_name = False
+            for role, nodes_info in node_groups.items():
+                for node_info in nodes_info:
+                    if node_info['name'] == nv_key or node_info['name'].lower() == nv_key.lower():
+                        is_full_name = True
+                        break
+                if is_full_name:
+                    break
+            
+            if is_full_name:
+                final_node_values[nv_key] = nv_values
+            else:
+                # Check if this is a short name that was already mapped
+                # If it's in short_name_to_full, it was already mapped, so skip it
+                if nv_key not in short_name_to_full:
+                    # Unknown format, keep it but log a warning
+                    final_node_values[nv_key] = nv_values
+                    logger.debug(f"Keeping unmapped key: {nv_key}")
+                else:
+                    logger.debug(f"Removing short name key that was mapped: {nv_key}")
+        
+        node_values = final_node_values
+        logger.info(f"After final filtering: {len(node_values)} unique nodes (only full names)")
         
         result = {
             'metric': metric['name'],
@@ -245,6 +278,9 @@ class socketStatTCPCollector:
             'timestamp': datetime.now(timezone.utc).isoformat(),
             'nodes': {}
         }
+        
+        # Track which node_values keys have been used to prevent duplicates
+        used_node_value_keys = set()
         
         for role, nodes_info in node_groups.items():
             if not nodes_info:
@@ -257,29 +293,38 @@ class socketStatTCPCollector:
                 
                 # Try multiple name variations, prioritizing full node name
                 values = None
+                matched_key = None
                 
                 # First try exact full name matches (case-sensitive and case-insensitive)
                 for name_variant in [node_name, node_name.lower()]:
-                    if name_variant in node_values:
+                    if name_variant in node_values and name_variant not in used_node_value_keys:
                         values = node_values[name_variant]
+                        matched_key = name_variant
                         logger.debug(f"Found values for {node_name} using exact full name match: {name_variant}")
                         break
                 
-                # If still no match, try partial matching - prefer longer (full) names over shorter ones
+                # If still no match, try partial matching - only match full names
                 if not values:
                     # Sort keys by length (longest first) to prefer full names over short names
                     sorted_keys = sorted(node_values.keys(), key=len, reverse=True)
                     for nv_key in sorted_keys:
-                        # Match if the full node name starts with the key (short name) or key starts with full name
-                        # This ensures we prefer full name matches
-                        if node_name.startswith(nv_key) or nv_key.startswith(node_name):
-                            values = node_values[nv_key]
-                            logger.debug(f"Found values for {node_name} using partial match: {nv_key}")
-                            break
+                        if nv_key in used_node_value_keys:
+                            continue
+                        # Only match if the key is a full name (exists in all_full_node_names)
+                        # and it matches the node_name (either exact or the node_name starts with it)
+                        if nv_key in all_full_node_names:
+                            if node_name == nv_key or node_name.lower() == nv_key.lower() or node_name.startswith(nv_key) or nv_key.startswith(node_name):
+                                values = node_values[nv_key]
+                                matched_key = nv_key
+                                logger.debug(f"Found values for {node_name} using partial match with full name: {nv_key}")
+                                break
                 
                 if values:
                     # Always use full node name in the result, never short names
                     role_data[node_name] = self._calculate_stats(values)
+                    # Mark this key as used to prevent duplicate matches
+                    if matched_key:
+                        used_node_value_keys.add(matched_key)
                 else:
                     logger.debug(f"No values found for node {node_name} (tried full name variants)")
             
