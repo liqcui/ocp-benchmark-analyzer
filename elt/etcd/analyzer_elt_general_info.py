@@ -155,7 +155,10 @@ class generalInfoELT(utilityELT):
     def _infer_role(self, node_name: str, pod_name: str = '') -> str:
         """Infer node role from node name or pod name"""
         name_to_check = (node_name or pod_name or '').lower()
-        if 'master' in name_to_check or 'control' in name_to_check:
+        # etcd pods run on control plane nodes
+        if 'etcd' in name_to_check:
+            return 'controlplane'
+        elif 'master' in name_to_check or 'control' in name_to_check:
             return 'controlplane'
         elif 'infra' in name_to_check:
             return 'infra'
