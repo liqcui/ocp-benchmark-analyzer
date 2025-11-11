@@ -185,7 +185,12 @@ class networkSocketMemELT(utilityELT):
             # Format max with top highlight
             max_display = self.format_and_highlight(max_val, unit, thresholds, is_top)
             
+            # Get metric title from config
+            metric_title = config.get('title', metric_name)
+            
             structured[table_key].append({
+                'Metric Name': metric_title,
+                'Role': role.title(),
                 'Node': self.truncate_node_name(node_name),
                 'Avg': avg_display,
                 'Max': max_display,
