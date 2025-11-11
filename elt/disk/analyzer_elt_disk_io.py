@@ -122,7 +122,11 @@ class diskIOELT(utilityELT):
         return structured
     
     def _categorize_nodes_by_role(self, metrics: Dict[str, Any]) -> Dict[str, str]:
-        """Categorize nodes by role based on node names"""
+        """Categorize nodes by role using node labels from Kubernetes API.
+        
+        Queries node role from node-role.kubernetes.io/master and other role labels,
+        with fallback to name-based inference if labels are unavailable.
+        """
         node_roles = {}
         
         # Collect all unique node names from metrics
@@ -130,17 +134,9 @@ class diskIOELT(utilityELT):
             if 'nodes' in metric_data:
                 for node_name in metric_data['nodes'].keys():
                     if node_name not in node_roles:
-                        # Determine role from node name patterns
-                        node_lower = node_name.lower()
-                        if 'master' in node_lower or 'control' in node_lower:
-                            node_roles[node_name] = 'controlplane'
-                        elif 'infra' in node_lower:
-                            node_roles[node_name] = 'infra'
-                        elif 'worker' in node_lower:
-                            node_roles[node_name] = 'worker'
-                        else:
-                            # Default to workload if can't determine
-                            node_roles[node_name] = 'workload'
+                        # Query role from node labels (node-role.kubernetes.io/master, etc.)
+                        role = self.get_node_role_from_labels(node_name)
+                        node_roles[node_name] = role
         
         return node_roles
     
