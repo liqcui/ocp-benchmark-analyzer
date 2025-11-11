@@ -494,7 +494,7 @@ async def get_network_io_node(request: NetworkIORequest) -> NetworkMetricsRespon
 @mcp.tool()
 async def get_network_l1_stats(request: NetworkL1Request) -> NetworkMetricsResponse:
     """
-    Get comprehensive Layer 1 network metrics across all cluster nodes.
+    Get comprehensive Layer 1 network metrics in ocp cluster, it's not node usage.
     
     Monitors physical layer network metrics including:
     - Network interface operational status (up/down)
