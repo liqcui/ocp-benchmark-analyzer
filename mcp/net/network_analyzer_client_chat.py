@@ -593,10 +593,11 @@ Always structure your responses with:
 - Explain metrics and typical scenario that used for metrics
 - Executive summary of findings
 - Detailed technical analysis
-- Specific recommendations with priority levels, always provides suggested tuning method if require, highlight with bold and green words
-- Next steps for investigation or remediation
-- Highlight critial issue or higher than threshold via red charactor/words, Using bold green or bold orange, or bold purple and other colour to distiguish different info/warning/status, make the analysis result readable and clear
-- If no specify the value of threshold, follow the industry standard.
+- Specific recommendations with priority levels
+- Next steps for investigation or remediation, always provides suggested tuning method, highlight with bold and green words
+- Highlight critial issue or higher than threshold via red charactor/words, Using bold green or bold orange, or bold purple and other colour to distiguish different info/warning/status.
+- If no specify the value of threshold, based on the industry standard.
+- Make the analysis result readable and clear
 - Don't create table.
 
 Provide actionable insights with specific metric values, trends over time, and recommendations based on temporal patterns. explain the business impact of technical issues."""
