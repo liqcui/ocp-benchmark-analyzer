@@ -6,7 +6,9 @@ NO metric-specific logic - only reusable utilities
 
 import logging
 import re
-from typing import Dict, Any, List, Union, Tuple
+import subprocess
+import json
+from typing import Dict, Any, List, Union, Tuple, Optional
 import pandas as pd
 from datetime import datetime
 
@@ -18,6 +20,8 @@ class utilityELT:
     
     def __init__(self):
         self.max_columns = 6
+        self._node_role_cache: Dict[str, str] = {}
+        self._node_labels_cache: Dict[str, Dict[str, str]] = {}
     
     # ============================================================================
     # TEXT FORMATTING UTILITIES
@@ -52,6 +56,135 @@ class utilityELT:
             protocol, version = runtime.split('://', 1)
             return f"{protocol}://{version[:max_length-len(protocol)-6]}..."
         return runtime[:max_length-3] + '...'
+    
+    # ============================================================================
+    # NODE ROLE QUERY UTILITIES
+    # ============================================================================
+    
+    def get_node_role_from_labels(self, node_name: str, node_labels: Optional[Dict[str, str]] = None) -> str:
+        """Get node role from node labels based on node-role.kubernetes.io/master and other role labels.
+        
+        Args:
+            node_name: Name of the node
+            node_labels: Optional dictionary of node labels. If not provided, will query via oc CLI.
+        
+        Returns:
+            Node role: 'controlplane', 'infra', 'worker', or 'workload'
+        """
+        # Check cache first
+        if node_name in self._node_role_cache:
+            return self._node_role_cache[node_name]
+        
+        # If labels not provided, try to get them
+        if node_labels is None:
+            node_labels = self.get_node_labels(node_name)
+        
+        if not node_labels:
+            # Fallback: try to infer from node name
+            return self._infer_role_from_name(node_name)
+        
+        # Check standard Kubernetes node role labels in priority order
+        # node-role.kubernetes.io/control-plane (newer label)
+        if 'node-role.kubernetes.io/control-plane' in node_labels:
+            role = 'controlplane'
+        # node-role.kubernetes.io/master (older label, still used in OpenShift)
+        elif 'node-role.kubernetes.io/master' in node_labels:
+            role = 'controlplane'
+        # node-role.kubernetes.io/infra
+        elif 'node-role.kubernetes.io/infra' in node_labels:
+            role = 'infra'
+        # node-role.kubernetes.io/worker
+        elif 'node-role.kubernetes.io/worker' in node_labels:
+            role = 'worker'
+        else:
+            # Fallback: infer from node name
+            role = self._infer_role_from_name(node_name)
+        
+        # Cache the result
+        self._node_role_cache[node_name] = role
+        return role
+    
+    def get_node_labels(self, node_name: str) -> Dict[str, str]:
+        """Get node labels for a specific node using oc CLI.
+        
+        Args:
+            node_name: Name of the node
+        
+        Returns:
+            Dictionary of node labels, or empty dict if query fails
+        """
+        # Check cache first
+        if node_name in self._node_labels_cache:
+            return self._node_labels_cache[node_name]
+        
+        # Try to get labels via oc CLI using JSON output
+        try:
+            # Try with full node name first
+            result = subprocess.run(
+                ['oc', 'get', 'node', node_name, '-o', 'json'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode == 0 and result.stdout:
+                node_data = json.loads(result.stdout)
+                labels = node_data.get('metadata', {}).get('labels', {})
+                
+                if labels:
+                    # Cache the result
+                    self._node_labels_cache[node_name] = labels
+                    return labels
+        except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+            logger.debug(f"Failed to query node labels via oc CLI for {node_name}: {e}")
+        
+        # If full name failed and node name contains '.', try short name
+        if '.' in node_name:
+            short_name = node_name.split('.')[0]
+            try:
+                result = subprocess.run(
+                    ['oc', 'get', 'node', short_name, '-o', 'json'],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                
+                if result.returncode == 0 and result.stdout:
+                    node_data = json.loads(result.stdout)
+                    labels = node_data.get('metadata', {}).get('labels', {})
+                    
+                    if labels:
+                        # Cache for both names
+                        self._node_labels_cache[node_name] = labels
+                        self._node_labels_cache[short_name] = labels
+                        return labels
+            except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+                logger.debug(f"Failed to query node labels via oc CLI for {short_name}: {e}")
+        
+        return {}
+    
+    def _infer_role_from_name(self, node_name: str) -> str:
+        """Infer node role from node name as fallback.
+        
+        Args:
+            node_name: Name of the node
+        
+        Returns:
+            Inferred role: 'controlplane', 'infra', 'worker', or 'workload'
+        """
+        name_lower = (node_name or '').lower()
+        
+        # etcd pods run on control plane nodes
+        if 'etcd' in name_lower:
+            return 'controlplane'
+        elif 'master' in name_lower or 'control' in name_lower:
+            return 'controlplane'
+        elif 'infra' in name_lower:
+            return 'infra'
+        elif 'workload' in name_lower:
+            return 'workload'
+        else:
+            return 'worker'
     
     # ============================================================================
     # CAPACITY PARSING UTILITIES

@@ -153,19 +153,31 @@ class generalInfoELT(utilityELT):
         return structured
     
     def _infer_role(self, node_name: str, pod_name: str = '') -> str:
-        """Infer node role from node name or pod name"""
-        name_to_check = (node_name or pod_name or '').lower()
-        # etcd pods run on control plane nodes
-        if 'etcd' in name_to_check:
-            return 'controlplane'
-        elif 'master' in name_to_check or 'control' in name_to_check:
-            return 'controlplane'
-        elif 'infra' in name_to_check:
-            return 'infra'
-        elif 'workload' in name_to_check:
-            return 'workload'
-        else:
-            return 'worker'
+        """Infer node role from node name or pod name using node labels.
+        
+        First tries to query node role from Kubernetes node labels (node-role.kubernetes.io/master),
+        then falls back to name-based inference.
+        """
+        # Use the node name to query role from labels
+        if node_name:
+            role = self.get_node_role_from_labels(node_name)
+            return role
+        
+        # Fallback: infer from pod name if node name not available
+        if pod_name:
+            name_lower = pod_name.lower()
+            # etcd pods run on control plane nodes
+            if 'etcd' in name_lower:
+                return 'controlplane'
+            elif 'master' in name_lower or 'control' in name_lower:
+                return 'controlplane'
+            elif 'infra' in name_lower:
+                return 'infra'
+            elif 'workload' in name_lower:
+                return 'workload'
+        
+        # Default fallback
+        return 'worker'
     
     def _extract_pod_metric(self, metric_name: str, metric_data: Dict[str, Any], 
                            structured: Dict[str, Any]):
