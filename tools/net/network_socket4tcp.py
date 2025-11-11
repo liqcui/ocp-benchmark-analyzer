@@ -164,6 +164,80 @@ class socketStatTCPCollector:
         node_groups = await self.utility.get_node_groups(self.prometheus_client)
         logger.info(f"Node groups: {[(k, len(v)) for k, v in node_groups.items()]}")
         
+        # Normalize node_values: consolidate short and full name entries
+        # If we have both short (e.g., "ip-10-0-58-109") and full (e.g., "ip-10-0-58-109.us-east-2.compute.internal")
+        # names for the same node, merge them and keep only the full name
+        normalized_node_values = {}
+        short_name_to_full = {}  # Map short names to their full names
+        
+        # First pass: build mapping of short names to full names from node_groups
+        for role, nodes_info in node_groups.items():
+            for node_info in nodes_info:
+                full_name = node_info['name']
+                short_name = full_name.split('.')[0]
+                if short_name != full_name:
+                    # If multiple nodes have same short name, prefer the one that matches exactly
+                    if short_name not in short_name_to_full:
+                        short_name_to_full[short_name] = full_name
+        
+        # Track which keys we've processed to avoid duplicates
+        processed_keys = set()
+        
+        # Second pass: consolidate node_values
+        # Process full names first, then short names to avoid conflicts
+        full_name_keys = []
+        short_name_keys = []
+        other_keys = []
+        
+        for nv_key in node_values.keys():
+            # Check if this key is a short name that has a corresponding full name
+            if nv_key in short_name_to_full:
+                short_name_keys.append(nv_key)
+            else:
+                # Check if this key is already a full name (exists in node_groups)
+                is_full_name = False
+                for role, nodes_info in node_groups.items():
+                    for node_info in nodes_info:
+                        if node_info['name'] == nv_key or node_info['name'].lower() == nv_key.lower():
+                            is_full_name = True
+                            break
+                    if is_full_name:
+                        break
+                
+                if is_full_name:
+                    full_name_keys.append(nv_key)
+                else:
+                    other_keys.append(nv_key)
+        
+        # Process full names first
+        for nv_key in full_name_keys:
+            normalized_node_values[nv_key] = node_values[nv_key]
+            processed_keys.add(nv_key)
+        
+        # Then process short names, mapping them to full names
+        for nv_key in short_name_keys:
+            if nv_key in processed_keys:
+                continue
+            full_name = short_name_to_full[nv_key]
+            # If full name already exists in normalized_node_values, merge the values
+            if full_name in normalized_node_values:
+                # Merge values: combine lists
+                normalized_node_values[full_name].extend(node_values[nv_key])
+                logger.debug(f"Merged short name {nv_key} into full name {full_name}")
+            else:
+                # Use full name for the short name entry
+                normalized_node_values[full_name] = node_values[nv_key]
+                logger.debug(f"Mapped short name {nv_key} to full name {full_name}")
+            processed_keys.add(nv_key)
+        
+        # Finally, process other keys (unknown format)
+        for nv_key in other_keys:
+            normalized_node_values[nv_key] = node_values[nv_key]
+        
+        # Replace node_values with normalized version
+        node_values = normalized_node_values
+        logger.info(f"After normalization: {len(node_values)} unique nodes")
+        
         result = {
             'metric': metric['name'],
             'unit': metric['unit'],
@@ -183,24 +257,28 @@ class socketStatTCPCollector:
                 
                 # Try multiple name variations, prioritizing full node name
                 values = None
+                
                 # First try exact full name matches (case-sensitive and case-insensitive)
                 for name_variant in [node_name, node_name.lower()]:
                     if name_variant in node_values:
                         values = node_values[name_variant]
-                        logger.debug(f"Found values for {node_name} using full name variant: {name_variant}")
+                        logger.debug(f"Found values for {node_name} using exact full name match: {name_variant}")
                         break
                 
-                # If still no match, try partial matching with full node name only
+                # If still no match, try partial matching - prefer longer (full) names over shorter ones
                 if not values:
-                    for nv_key in node_values.keys():
-                        # Match if the full node name is contained in the key or vice versa
-                        if node_name in nv_key or nv_key in node_name:
+                    # Sort keys by length (longest first) to prefer full names over short names
+                    sorted_keys = sorted(node_values.keys(), key=len, reverse=True)
+                    for nv_key in sorted_keys:
+                        # Match if the full node name starts with the key (short name) or key starts with full name
+                        # This ensures we prefer full name matches
+                        if node_name.startswith(nv_key) or nv_key.startswith(node_name):
                             values = node_values[nv_key]
-                            logger.debug(f"Found values for {node_name} using partial match with full name: {nv_key}")
+                            logger.debug(f"Found values for {node_name} using partial match: {nv_key}")
                             break
                 
                 if values:
-                    # Always use full node name in the result
+                    # Always use full node name in the result, never short names
                     role_data[node_name] = self._calculate_stats(values)
                 else:
                     logger.debug(f"No values found for node {node_name} (tried full name variants)")
