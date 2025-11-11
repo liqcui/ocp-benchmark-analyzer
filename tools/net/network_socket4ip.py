@@ -98,11 +98,37 @@ class socketStatIPCollector:
             for role in roles_template.keys():
                 nodes = node_groups.get(role, [])
                 if nodes:
-                    role_rows = []
+                    # Filter to only use full names (FQDN with dots)
+                    node_map = {}  # prefix -> full_name
                     for node_info in nodes:
                         node_name = node_info.get('name') or ''
+                        if '.' in node_name:  # Full name
+                            prefix = node_name.split('.')[0]
+                            if prefix not in node_map or len(node_name) > len(node_map[prefix]):
+                                node_map[prefix] = node_name
+                    
+                    role_rows = []
+                    seen_prefixes = set()
+                    for node_info in nodes:
+                        node_name = node_info.get('name') or ''
+                        prefix = node_name.split('.')[0] if node_name else ''
+                        
+                        # Skip if we've already processed this node (by prefix)
+                        if prefix in seen_prefixes:
+                            continue
+                        
+                        # Use full name if available, otherwise skip short names
+                        if prefix in node_map:
+                            full_node_name = node_map[prefix]
+                        elif '.' in node_name:
+                            full_node_name = node_name
+                        else:
+                            # Short name without full name - skip it
+                            continue
+                        
+                        seen_prefixes.add(prefix)
                         role_rows.append({
-                            "node": node_name,
+                            "node": full_node_name,
                             "avg": 0.0,
                             "max": 0.0,
                             "unit": unit
@@ -165,49 +191,95 @@ class socketStatIPCollector:
                         node_values[node_name] = []
                     node_values[node_name].extend(values)
         
-        # Organize by node groups
+        # Clean up node_values: remove short names, keep only full names (FQDN)
+        # Build a mapping of short names to full names
+        short_to_full = {}
+        full_names = {}
+        for nv_key in list(node_values.keys()):
+            if '.' in nv_key:  # Full name (FQDN)
+                prefix = nv_key.split('.')[0]
+                if prefix not in short_to_full or len(nv_key) > len(short_to_full[prefix]):
+                    short_to_full[prefix] = nv_key
+                full_names[nv_key] = node_values[nv_key]
+            else:  # Short name
+                if nv_key not in short_to_full:
+                    short_to_full[nv_key] = None
+        
+        # Merge short name values into full names
+        for nv_key in list(node_values.keys()):
+            if '.' not in nv_key:  # Short name
+                prefix = nv_key
+                if prefix in short_to_full and short_to_full[prefix]:
+                    full_name = short_to_full[prefix]
+                    if full_name in full_names:
+                        full_names[full_name].extend(node_values[nv_key])
+                    else:
+                        full_names[full_name] = node_values[nv_key]
+        
+        # Replace node_values with only full names
+        node_values = full_names
+        
+        # Organize by node groups - filter to only use full names
         result = {role: [] for role in ['controlplane', 'worker', 'infra', 'workload']}
         for role in ['controlplane', 'worker', 'infra', 'workload']:
             nodes = node_groups.get(role, [])
             if not nodes:
                 # Keep empty list for roles with no nodes
                 continue
-                
-            role_data = []
-            seen_nodes = set()
+            
+            # Filter nodes to only use full names (FQDN with dots)
+            # Group by prefix to find full name for each node
+            node_map = {}  # prefix -> full_name
             for node_info in nodes:
-                node_name = node_info['name']  # Always use full node name from node_info
+                node_name = node_info['name']
+                if '.' in node_name:  # Full name
+                    prefix = node_name.split('.')[0]
+                    if prefix not in node_map or len(node_name) > len(node_map[prefix]):
+                        node_map[prefix] = node_name
+            
+            role_data = []
+            seen_prefixes = set()
+            for node_info in nodes:
+                node_name = node_info['name']
+                prefix = node_name.split('.')[0]
                 
-                # Only match against full node names - no short name variants
-                # Try exact match first (case-sensitive)
-                values = node_values.get(node_name)
+                # Skip if we've already processed this node (by prefix)
+                if prefix in seen_prefixes:
+                    continue
+                
+                # Use full name if available, otherwise skip short names
+                if prefix in node_map:
+                    full_node_name = node_map[prefix]
+                elif '.' in node_name:
+                    full_node_name = node_name
+                else:
+                    # Short name without full name - skip it
+                    continue
+                
+                seen_prefixes.add(prefix)
+                
+                # Match against full node names only
+                values = node_values.get(full_node_name)
                 
                 # Try case-insensitive exact match
                 if not values:
                     for nv_key, nv_values in node_values.items():
-                        if nv_key.lower() == node_name.lower():
+                        if nv_key.lower() == full_node_name.lower():
                             values = nv_values
                             break
                 
-                # Fallback: match if node_name is contained in the key (for FQDN matching)
-                # Only match if the key starts with the node name prefix (first part before dot)
+                # Fallback: match by prefix
                 if not values:
-                    node_prefix = node_name.split('.')[0]
                     for nv_key, nv_values in node_values.items():
-                        try:
-                            # Match if the key contains the full node name or starts with the same prefix
-                            if node_name in nv_key or nv_key.startswith(node_prefix):
-                                values = nv_values
-                                break
-                        except Exception:
-                            continue
+                        if nv_key.startswith(prefix + '.'):
+                            values = nv_values
+                            break
                 
-                # Only create one entry per node using the full node name
-                if values and node_name not in seen_nodes:
-                    seen_nodes.add(node_name)
+                # Create entry only with full node name
+                if values:
                     stats = self._calculate_statistics(values)
                     role_data.append({
-                        "node": node_name,
+                        "node": full_node_name,
                         "avg": round(stats["avg"], 2),
                         "max": round(stats["max"], 2),
                         "unit": unit
@@ -223,12 +295,30 @@ class socketStatIPCollector:
                 result[role] = role_data
             
             # If still no rows for this role, prefill zeros for visibility
+            # Use the same node_map we built earlier to ensure only full names
             if not result[role] and nodes:
                 prefill = []
+                seen_prefixes = set()
                 for node_info in nodes:
                     node_name = node_info.get('name') or ''
+                    prefix = node_name.split('.')[0] if node_name else ''
+                    
+                    # Skip if we've already processed this node (by prefix)
+                    if prefix in seen_prefixes:
+                        continue
+                    
+                    # Use full name if available, otherwise skip short names
+                    if prefix in node_map:
+                        full_node_name = node_map[prefix]
+                    elif '.' in node_name:
+                        full_node_name = node_name
+                    else:
+                        # Short name without full name - skip it
+                        continue
+                    
+                    seen_prefixes.add(prefix)
                     prefill.append({
-                        "node": node_name,
+                        "node": full_node_name,
                         "avg": 0.0,
                         "max": 0.0,
                         "unit": unit
