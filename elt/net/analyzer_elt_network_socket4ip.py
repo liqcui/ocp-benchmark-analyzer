@@ -120,6 +120,8 @@ class networkSocketIPELT(utilityELT):
                 )
                 
                 structured[table_key].append({
+                    'Metric Name': config['title'],
+                    'Role': role.title(),
                     'Node': self.truncate_node_name(node_name),
                     'Avg': avg_display,
                     'Max': max_display
@@ -158,6 +160,8 @@ class networkSocketIPELT(utilityELT):
                 )
                 
                 structured[table_key].append({
+                    'Metric Name': config['title'],
+                    'Role': role.title(),
                     'Node': self.truncate_node_name(node_name),
                     'Avg': avg_display,
                     'Max': max_display
@@ -196,6 +200,8 @@ class networkSocketIPELT(utilityELT):
                 )
                 
                 structured[table_key].append({
+                    'Metric Name': config['title'],
+                    'Role': role.title(),
                     'Node': self.truncate_node_name(node_name),
                     'Avg': avg_display,
                     'Max': max_display
@@ -273,6 +279,8 @@ class networkSocketIPELT(utilityELT):
                 )
                 
                 structured[table_key].append({
+                    'Metric Name': config['title'],
+                    'Role': role.title(),
                     'Node': self.truncate_node_name(node_name),
                     'Avg': avg_display,
                     'Max': max_display
