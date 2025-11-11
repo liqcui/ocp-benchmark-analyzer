@@ -283,6 +283,16 @@ class GenericELT(utilityELT):
             )
         except ImportError as e:
             logger.warning(f"Could not import general_info handler: {e}")
+
+        try:
+            from ..etcd.analyzer_elt_performance_deep_drive import performanceDeepDriveELT
+            register_metric_handler(
+                'etcd_performance_deep_drive',
+                performanceDeepDriveELT,
+                self._is_etcd_performance_deep_drive
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import etcd_performance_deep_drive handler: {e}")
      
 
         # Register api_stats BEFORE ovn_latency to ensure correct identification
@@ -684,6 +694,32 @@ class GenericELT(utilityELT):
         return False
 
     @staticmethod
+    def _is_etcd_performance_deep_drive(data: Dict[str, Any]) -> bool:
+        """Identify etcd performance deep drive data"""
+        # Check top-level category (accept both old and new category names for backward compatibility)
+        if 'category' in data:
+            category = data.get('category')
+            if category in ['performance_deep_drive', 'etcd_performance_deep_drive']:
+                return True
+        
+        # Check nested structure
+        if 'data' in data and isinstance(data.get('data'), dict):
+            inner = data['data']
+            # Check for performance deep drive data structure
+            if any(key in inner for key in [
+                'general_info_data', 'wal_fsync_data', 'disk_io_data',
+                'network_data', 'backend_commit_data', 'compact_defrag_data',
+                'node_usage_data'
+            ]):
+                return True
+        
+        # Check for test_id and analysis fields (indicators of deep drive)
+        if 'test_id' in data and 'analysis' in data:
+            return True
+        
+        return False
+
+    @staticmethod
     def _is_general_info(data: Dict[str, Any]) -> bool:
         """Identify general info data"""
         # Check top-level category
@@ -916,7 +952,11 @@ class GenericELT(utilityELT):
         """Process data using specialized handler"""
         try:
             # Extract nested data if needed
-            actual_data = self._extract_actual_data(data, data_type)
+            # For etcd_performance_deep_drive, pass the full data structure to preserve summary/analysis
+            if data_type == 'etcd_performance_deep_drive':
+                actual_data = data
+            else:
+                actual_data = self._extract_actual_data(data, data_type)
             logger.debug(f"Extracted actual_data for {data_type}. Keys: {list(actual_data.keys())[:10]}")
             
             # Use handler's methods with appropriate method names
@@ -974,6 +1014,9 @@ class GenericELT(utilityELT):
             elif data_type == 'general_info':
                 structured_data = handler.extract_general_info(actual_data) if hasattr(handler, 'extract_general_info') else {}
                 summary_method = 'summarize_general_info'
+            elif data_type == 'etcd_performance_deep_drive':
+                structured_data = handler.extract_performance_deep_drive(actual_data) if hasattr(handler, 'extract_performance_deep_drive') else {}
+                summary_method = 'summarize_performance_deep_drive'
             elif data_type == 'ovn_latency':
                 structured_data = handler.extract_ovn_latency(actual_data) if hasattr(handler, 'extract_ovn_latency') else {}
                 summary_method = 'summarize_ovn_latency'
@@ -1132,6 +1175,12 @@ class GenericELT(utilityELT):
                 return data['result']['data']
 
         if data_type == 'general_info':
+            if 'data' in data and isinstance(data.get('data'), dict):
+                return data['data']
+            if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
+                return data['result']['data']
+
+        if data_type == 'etcd_performance_deep_drive':
             if 'data' in data and isinstance(data.get('data'), dict):
                 return data['data']
             if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
