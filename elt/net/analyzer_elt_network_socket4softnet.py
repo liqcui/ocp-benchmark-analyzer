@@ -123,6 +123,8 @@ class networkSocketSoftnetELT(utilityELT):
                 )
                 
                 structured[table_key].append({
+                    'Metric Name': config['title'],
+                    'Role': role.title(),
                     'Node': self.truncate_node_name(node_name),
                     'Avg': avg_display,
                     'Max': max_display
@@ -160,6 +162,8 @@ class networkSocketSoftnetELT(utilityELT):
                 )
                 
                 structured[table_key].append({
+                    'Metric Name': config['title'],
+                    'Role': role.title(),
                     'Node': self.truncate_node_name(node_name),
                     'Avg': avg_display,
                     'Max': max_display
@@ -207,6 +211,8 @@ class networkSocketSoftnetELT(utilityELT):
                     max_display = f'{max_val:g}'
                 
                 structured[table_key].append({
+                    'Metric Name': config['title'],
+                    'Role': role.title(),
                     'Node': self.truncate_node_name(node_name),
                     'Avg': avg_display,
                     'Max': max_display
@@ -244,6 +250,8 @@ class networkSocketSoftnetELT(utilityELT):
                 )
                 
                 structured[table_key].append({
+                    'Metric Name': config['title'],
+                    'Role': role.title(),
                     'Node': self.truncate_node_name(node_name),
                     'Avg': avg_display,
                     'Max': max_display
@@ -282,6 +290,8 @@ class networkSocketSoftnetELT(utilityELT):
                 )
                 
                 structured[table_key].append({
+                    'Metric Name': config['title'],
+                    'Role': role.title(),
                     'Node': self.truncate_node_name(node_name),
                     'Avg': avg_display,
                     'Max': max_display
