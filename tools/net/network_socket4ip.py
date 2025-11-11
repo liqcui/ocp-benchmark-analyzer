@@ -115,7 +115,7 @@ class socketStatIPCollector:
                     result_zero[role] = []
             return result_zero
         
-        # Parse all results
+        # Parse all results - prefer full node names (FQDN) over short names
         node_values: Dict[str, List[float]] = {}
         for item in metric_data['result']:
             labels = item.get('metric', {}) or {}
@@ -123,10 +123,13 @@ class socketStatIPCollector:
             node = labels.get('node', '')
             nodename = labels.get('nodename', '')
             node_name = ''
-            if instance:
+            # Prefer nodename (usually FQDN), then node, then instance
+            if nodename:
+                node_name = nodename
+            elif node:
+                node_name = node
+            elif instance:
                 node_name = instance.split(':')[0]
-            if not node_name:
-                node_name = node or nodename
             
             values = []
             for ts, val in item.get('values', []):
@@ -138,9 +141,29 @@ class socketStatIPCollector:
                     continue
             
             if values and node_name:
-                if node_name not in node_values:
-                    node_values[node_name] = []
-                node_values[node_name].extend(values)
+                # Check if we already have a variant of this node (short vs full name)
+                # If one is a prefix of the other, merge into the longer (full) name
+                node_prefix = node_name.split('.')[0]
+                merged = False
+                for existing_node in list(node_values.keys()):
+                    existing_prefix = existing_node.split('.')[0]
+                    # If they share the same prefix (same node, different formats)
+                    if node_prefix == existing_prefix:
+                        # Use the longer name (full FQDN)
+                        target_key = existing_node if len(existing_node) >= len(node_name) else node_name
+                        if target_key not in node_values:
+                            node_values[target_key] = []
+                        # Merge values from both
+                        node_values[target_key].extend(values)
+                        if existing_node != target_key and existing_node in node_values:
+                            node_values[target_key].extend(node_values.pop(existing_node))
+                        merged = True
+                        break
+                
+                if not merged:
+                    if node_name not in node_values:
+                        node_values[node_name] = []
+                    node_values[node_name].extend(values)
         
         # Organize by node groups
         result = {role: [] for role in ['controlplane', 'worker', 'infra', 'workload']}
@@ -153,29 +176,34 @@ class socketStatIPCollector:
             role_data = []
             seen_nodes = set()
             for node_info in nodes:
-                node_name = node_info['name']
-                short_name = node_name.split('.')[0]
+                node_name = node_info['name']  # Always use full node name from node_info
                 
-                # Build candidate variants (full, short, lowercased)
-                variants = [node_name, short_name, node_name.lower(), short_name.lower()]
-                # Try direct matches first
-                values = None
-                for v in variants:
-                    if v in node_values:
-                        values = node_values[v]
-                        break
-                # Fallback: partial/fuzzy match
+                # Only match against full node names - no short name variants
+                # Try exact match first (case-sensitive)
+                values = node_values.get(node_name)
+                
+                # Try case-insensitive exact match
                 if not values:
-                    for nv_key in node_values.keys():
+                    for nv_key, nv_values in node_values.items():
+                        if nv_key.lower() == node_name.lower():
+                            values = nv_values
+                            break
+                
+                # Fallback: match if node_name is contained in the key (for FQDN matching)
+                # Only match if the key starts with the node name prefix (first part before dot)
+                if not values:
+                    node_prefix = node_name.split('.')[0]
+                    for nv_key, nv_values in node_values.items():
                         try:
-                            if any(v and (v in nv_key or nv_key in v) for v in variants):
-                                values = node_values[nv_key]
+                            # Match if the key contains the full node name or starts with the same prefix
+                            if node_name in nv_key or nv_key.startswith(node_prefix):
+                                values = nv_values
                                 break
                         except Exception:
                             continue
-                if values:
-                    if node_name in seen_nodes:
-                        continue
+                
+                # Only create one entry per node using the full node name
+                if values and node_name not in seen_nodes:
                     seen_nodes.add(node_name)
                     stats = self._calculate_statistics(values)
                     role_data.append({
