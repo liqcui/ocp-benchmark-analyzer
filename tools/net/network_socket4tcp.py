@@ -180,28 +180,30 @@ class socketStatTCPCollector:
             
             for node_info in nodes_info:
                 node_name = node_info['name']
-                short_name = node_name.split('.')[0]
                 
-                # Try multiple name variations
+                # Try multiple name variations, prioritizing full node name
                 values = None
-                for name_variant in [node_name, short_name, node_name.lower(), short_name.lower()]:
+                # First try exact full name matches (case-sensitive and case-insensitive)
+                for name_variant in [node_name, node_name.lower()]:
                     if name_variant in node_values:
                         values = node_values[name_variant]
-                        logger.debug(f"Found values for {node_name} using variant: {name_variant}")
+                        logger.debug(f"Found values for {node_name} using full name variant: {name_variant}")
                         break
                 
-                # If still no match, try partial matching
+                # If still no match, try partial matching with full node name only
                 if not values:
                     for nv_key in node_values.keys():
-                        if short_name in nv_key or nv_key in short_name:
+                        # Match if the full node name is contained in the key or vice versa
+                        if node_name in nv_key or nv_key in node_name:
                             values = node_values[nv_key]
-                            logger.debug(f"Found values for {node_name} using partial match: {nv_key}")
+                            logger.debug(f"Found values for {node_name} using partial match with full name: {nv_key}")
                             break
                 
                 if values:
+                    # Always use full node name in the result
                     role_data[node_name] = self._calculate_stats(values)
                 else:
-                    logger.debug(f"No values found for node {node_name} (tried: {node_name}, {short_name})")
+                    logger.debug(f"No values found for node {node_name} (tried full name variants)")
             
             # Apply top 3 filter for workers
             if role == 'worker' and len(role_data) > 3:
