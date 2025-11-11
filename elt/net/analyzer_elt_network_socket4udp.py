@@ -158,6 +158,8 @@ class networkSocketUDPELT(utilityELT):
             max_display = self.format_and_highlight(max_val, unit, thresholds, is_top)
             
             structured[table_key].append({
+                'Metric Name': self.metric_configs['socket_udp_inuse']['title'],
+                'Role': role.title(),
                 'Node': self.truncate_node_name(node_name),
                 'Avg Usage': avg_display,
                 'Max Usage': max_display,
@@ -198,6 +200,8 @@ class networkSocketUDPELT(utilityELT):
             max_display = self.format_and_highlight(max_val, unit, thresholds, is_top)
             
             structured[table_key].append({
+                'Metric Name': self.metric_configs['socket_udp_lite_inuse']['title'],
+                'Role': role.title(),
                 'Node': self.truncate_node_name(node_name),
                 'Avg Usage': avg_display,
                 'Max Usage': max_display,
