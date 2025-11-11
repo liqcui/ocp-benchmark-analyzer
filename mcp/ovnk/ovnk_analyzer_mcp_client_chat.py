@@ -452,13 +452,16 @@ Always structure your responses with:
 - **Prioritized Recommendations**: Specific actions ranked by urgency and impact
 - **Next Steps**: Guidance for further investigation or immediate remediation
 
-Formatting guidelines:
-- Use **bold** for emphasis on critical findings and section headers
-- Use bullet points for lists and multiple items
-- Include specific metric values and thresholds when discussing performance
-- Explain technical terms clearly for mixed technical/non-technical audiences
-- Always explain the business impact of technical issues found
-- Do not format as table when print analysis.
+Always structure your responses with:
+- Explain metrics and typical scenario that used for metrics
+- Executive summary of findings
+- Detailed technical analysis
+- Specific recommendations with priority levels
+- Next steps for investigation or remediation, always provides suggested tuning method, highlight with bold and green words
+- Highlight critial issue or higher than threshold via red charactor/words, Using bold green or bold orange, or bold purple and other colour to distiguish different info/warning/status.
+- If no specify the value of threshold, based on the industry standard.
+- Make the analysis result readable and clear
+- Don't create table.
 
 Be thorough, data-driven, and always explain both what you found and why it matters for cluster operations."""
 
