@@ -165,8 +165,6 @@ class apiUsageCollector:
                     series_info.update({
                         'avg_seconds': round(stats.get('avg', 0), 6),
                         'max_seconds': round(stats.get('max', 0), 6),
-                        'min_seconds': round(stats.get('min', 0), 6),
-                        'latest_seconds': round(stats.get('latest', 0), 6) if stats.get('latest') is not None else None,
                         'data_points': stats.get('count', 0)
                     })
                     # Store sort key for top 5
@@ -175,8 +173,6 @@ class apiUsageCollector:
                     series_info.update({
                         'avg_requests_per_sec': round(stats.get('avg', 0), 3),
                         'max_requests_per_sec': round(stats.get('max', 0), 3),
-                        'min_requests_per_sec': round(stats.get('min', 0), 3),
-                        'latest_requests_per_sec': round(stats.get('latest', 0), 3) if stats.get('latest') is not None else None,
                         'data_points': stats.get('count', 0)
                     })
                     # Store sort key for top 5
@@ -185,8 +181,6 @@ class apiUsageCollector:
                     series_info.update({
                         'avg_count': round(stats.get('avg', 0), 2),
                         'max_count': round(stats.get('max', 0), 2),
-                        'min_count': round(stats.get('min', 0), 2),
-                        'latest_count': round(stats.get('latest', 0), 2) if stats.get('latest') is not None else None,
                         'data_points': stats.get('count', 0)
                     })
                     # Store sort key for top 5
@@ -195,8 +189,6 @@ class apiUsageCollector:
                     series_info.update({
                         'avg_value': round(stats.get('avg', 0), 6),
                         'max_value': round(stats.get('max', 0), 6),
-                        'min_value': round(stats.get('min', 0), 6),
-                        'latest_value': round(stats.get('latest', 0), 6) if stats.get('latest') is not None else None,
                         'data_points': stats.get('count', 0)
                     })
                     # Store sort key for top 5
@@ -213,9 +205,9 @@ class apiUsageCollector:
                     node_mapping[instance] = node_name
                     series_info['node_name'] = node_name
             
-            # Sort by the sort value (max) and get top 5
+            # Sort by the sort value (max) and get top 3
             series_stats.sort(key=lambda x: x.get('_sort_value', 0), reverse=True)
-            top_5 = []
+            top_3 = []
             all_series = []
             
             for i, series_info in enumerate(series_stats):
@@ -223,8 +215,8 @@ class apiUsageCollector:
                 series_info.pop('_sort_value', None)
                 
                 all_series.append(series_info)
-                if i < 5:
-                    top_5.append(series_info)
+                if i < 3:
+                    top_3.append(series_info)
             
             return {
                 'status': 'success',
@@ -232,7 +224,7 @@ class apiUsageCollector:
                 'title': metric_config.get('title', metric_name.replace('_', ' ').title()),
                 'unit': metric_config.get('unit', 'unknown'),
                 'description': metric_config.get('description', ''),
-                'top_5': top_5,
+                'top_3': top_3,
                 'all_series': all_series,
                 'total_series': len(series_stats),
                 'overall_stats': result.get('overall_statistics', {})
@@ -307,13 +299,10 @@ class apiUsageCollector:
                 if values:
                     avg_v = sum(values) / len(values)
                     max_v = max(values)
-                    min_v = min(values)
                     stats = {
                         'avg': avg_v,
                         'max': max_v,
-                        'min': min_v,
-                        'count': len(values),
-                        'latest': values[-1]
+                        'count': len(values)
                     }
                     all_values.extend(values)
 
@@ -324,7 +313,6 @@ class apiUsageCollector:
                 overall_statistics = {
                     'avg': sum(all_values) / len(all_values),
                     'max': max(all_values),
-                    'min': min(all_values),
                     'count': len(all_values)
                 }
 
@@ -519,7 +507,7 @@ class apiUsageCollector:
                 summary['performance_indicators']['read_only_latency'] = {
                     'max_seconds': round(max_latency, 6),
                     'avg_seconds': round(avg_latency, 6),
-                    'top_5_resources': ro_latency.get('top_5', [])
+                    'top_3_resources': ro_latency.get('top_3', [])
                 }
                 
                 # Performance assessment
@@ -562,7 +550,7 @@ class apiUsageCollector:
                 summary['performance_indicators']['mutating_latency'] = {
                     'max_seconds': round(max_latency, 6),
                     'avg_seconds': round(avg_latency, 6),
-                    'top_5_resources': mutating_latency.get('top_5', [])
+                    'top_3_resources': mutating_latency.get('top_3', [])
                 }
                 
                 if max_latency > 30.0:
@@ -593,7 +581,7 @@ class apiUsageCollector:
                 summary['performance_indicators']['error_rate'] = {
                     'avg_errors_per_sec': round(avg_errors, 3),
                     'max_errors_per_sec': round(max_errors, 3),
-                    'top_5_errors': error_rate.get('top_5', [])
+                    'top_3_errors': error_rate.get('top_3', [])
                 }
                 
                 if avg_errors > 10:
@@ -624,7 +612,7 @@ class apiUsageCollector:
                 summary['performance_indicators']['request_rate'] = {
                     'avg_requests_per_sec': round(avg_rate, 3),
                     'max_requests_per_sec': round(max_rate, 3),
-                    'top_5_resources': request_rate.get('top_5', [])
+                    'top_3_resources': request_rate.get('top_3', [])
                 }
                 
                 if avg_rate > 1000:
@@ -640,7 +628,7 @@ class apiUsageCollector:
                 summary['performance_indicators']['inflight_requests'] = {
                     'avg_count': round(avg_inflight, 2),
                     'max_count': round(max_inflight, 2),
-                    'breakdown': inflight.get('top_5', [])
+                    'breakdown': inflight.get('top_3', [])
                 }
                 
                 if max_inflight > 1000:
@@ -663,7 +651,7 @@ class apiUsageCollector:
                 summary['performance_indicators']['etcd_latency'] = {
                     'avg_seconds': round(avg_latency, 6),
                     'max_seconds': round(max_latency, 6),
-                    'top_5_operations': etcd_latency.get('top_5', [])
+                    'top_3_operations': etcd_latency.get('top_3', [])
                 }
                 
                 if max_latency > 0.1:
@@ -694,7 +682,7 @@ class apiUsageCollector:
                 summary['performance_indicators']['priority_fairness_wait'] = {
                     'avg_seconds': round(avg_wait, 6),
                     'max_seconds': round(max_wait, 6),
-                    'top_5_flows': pf_wait.get('top_5', [])
+                    'top_3_flows': pf_wait.get('top_3', [])
                 }
                 
                 if max_wait > 1.0:

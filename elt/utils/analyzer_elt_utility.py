@@ -983,4 +983,151 @@ class utilityELT:
             else:
                 return f'<span class="text-success">{formatted}</span>'
         except (ValueError, TypeError):
-            return str(value_seconds)                                 
+            return str(value_seconds)  
+
+    def format_flow_count(self, flows: Union[int, float]) -> str:
+        """Format flow counts to readable units"""
+        try:
+            flows = int(float(flows))
+            if flows == 0:
+                return "0"
+            elif flows < 1000:
+                return f"{flows:,}"
+            elif flows < 1000000:
+                return f"{flows/1000:.1f}K"
+            else:
+                return f"{flows/1000000:.2f}M"
+        except (ValueError, TypeError):
+            return str(flows)
+
+    def get_ovs_metric_thresholds(self, metric_name: str) -> Dict[str, float]:
+        """Get thresholds for OVS metrics"""
+        metric_lower = str(metric_name).lower()
+        
+        if 'cpu' in metric_lower:
+            return {'critical': 80.0, 'warning': 60.0}
+        elif 'memory' in metric_lower or 'size_bytes' in metric_lower:
+            # Memory in GB
+            return {'critical': 2.0, 'warning': 1.5}
+        elif 'flows' in metric_lower:
+            return {'critical': 100000.0, 'warning': 50000.0}
+        elif 'connections' in metric_lower:
+            return {'critical': 1000.0, 'warning': 500.0}
+        elif 'overflow' in metric_lower or 'discarded' in metric_lower:
+            return {'critical': 100.0, 'warning': 10.0}
+        elif 'cache_hits' in metric_lower or 'cache_misses' in metric_lower:
+            return {'critical': 1000000.0, 'warning': 500000.0}
+        elif 'packet_rate' in metric_lower:
+            return {'critical': 100000.0, 'warning': 50000.0}
+        elif 'error_rate' in metric_lower:
+            return {'critical': 100.0, 'warning': 10.0}
+        else:
+            return {'critical': 80.0, 'warning': 60.0}
+
+    def highlight_ovs_value(self, value: float, metric_name: str, 
+                        unit: str = "", is_top: bool = False) -> str:
+        """Highlight OVS metric values with color coding"""
+        try:
+            value = float(value) if value is not None else 0
+        except (ValueError, TypeError):
+            return str(value) + unit
+        
+        thresholds = self.get_ovs_metric_thresholds(metric_name)
+        
+        # Format value based on unit
+        if unit == 'percent':
+            formatted = self.format_percentage(value)
+        elif unit == 'bytes':
+            formatted = self.format_memory_display(f"{value}B")
+        elif unit == 'flows':
+            formatted = self.format_flow_count(value)
+        elif unit == 'bytes_per_second':
+            formatted = self.format_bytes_per_second(value)
+        elif unit == 'packets_per_second':
+            formatted = self.format_packets_per_second(value)
+        else:
+            formatted = f"{value:g} {unit}".strip()
+        
+        # Apply highlighting
+        if is_top and value > 0:
+            return f'<span class="text-primary font-weight-bold bg-light px-1">🏆 {formatted}</span>'
+        elif value >= thresholds['critical']:
+            return f'<span class="text-danger font-weight-bold">⚠️ {formatted}</span>'
+        elif value >= thresholds['warning']:
+            return f'<span class="text-warning font-weight-bold">{formatted}</span>'
+        else:
+            return formatted
+
+    def format_iops(self, iops: float) -> str:
+        """Format IOPS values to readable units"""
+        try:
+            iops = float(iops)
+            if iops == 0:
+                return "0 IOPS"
+            elif iops < 1:
+                return f"{iops:.3f} IOPS"
+            elif iops < 1000:
+                return f"{iops:.2f} IOPS"
+            else:
+                return f"{iops/1000:.2f}K IOPS"
+        except (ValueError, TypeError):
+            return str(iops)
+
+    def format_threads(self, threads: float) -> str:
+        """Format thread count"""
+        try:
+            threads = int(float(threads))
+            if threads < 1000:
+                return f"{threads}"
+            else:
+                return f"{threads/1000:.1f}K"
+        except (ValueError, TypeError):
+            return str(threads)
+
+    def get_iops_thresholds(self) -> Dict[str, float]:
+        """Get standard IOPS thresholds"""
+        return {
+            'critical': 50.0,  # >50 IOPS might indicate issues
+            'warning': 30.0
+        }
+
+    def get_thread_thresholds(self) -> Dict[str, float]:
+        """Get standard thread count thresholds"""
+        return {
+            'critical': 2000.0,  # >2000 threads
+            'warning': 1500.0
+        }
+
+    def highlight_iops_value(self, value: float, is_top: bool = False) -> str:
+        """Highlight IOPS value with color coding"""
+        try:
+            thresholds = self.get_iops_thresholds()
+            formatted = self.format_iops(value)
+            
+            if is_top:
+                return f'<span class="text-primary font-weight-bold bg-light px-1">🏆 {formatted}</span>'
+            elif value >= thresholds['critical']:
+                return f'<span class="text-danger font-weight-bold">⚠️ {formatted}</span>'
+            elif value >= thresholds['warning']:
+                return f'<span class="text-warning font-weight-bold">{formatted}</span>'
+            else:
+                return formatted
+        except (ValueError, TypeError):
+            return str(value)
+
+    def highlight_thread_value(self, value: float, is_top: bool = False) -> str:
+        """Highlight thread count with color coding"""
+        try:
+            thresholds = self.get_thread_thresholds()
+            formatted = self.format_threads(value)
+            
+            if is_top:
+                return f'<span class="text-primary font-weight-bold bg-light px-1">🏆 {formatted}</span>'
+            elif value >= thresholds['critical']:
+                return f'<span class="text-danger font-weight-bold">⚠️ {formatted}</span>'
+            elif value >= thresholds['warning']:
+                return f'<span class="text-warning font-weight-bold">{formatted}</span>'
+            else:
+                return formatted
+        except (ValueError, TypeError):
+            return str(value)

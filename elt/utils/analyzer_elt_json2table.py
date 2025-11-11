@@ -11,6 +11,7 @@ import pandas as pd
 from datetime import datetime
 
 from .analyzer_elt_utility import utilityELT
+from ..ocp.analyzer_elt_cluster_apistats import apiStatsELT
 
 logger = logging.getLogger(__name__)
 
@@ -284,6 +285,18 @@ class GenericELT(utilityELT):
             logger.warning(f"Could not import general_info handler: {e}")
      
 
+        # Register api_stats BEFORE ovn_latency to ensure correct identification
+        # (api_stats has category='api_server' which is more specific)
+        try:
+            from ..ocp.analyzer_elt_cluster_apistats import apiStatsELT
+            register_metric_handler(
+                'api_stats',
+                apiStatsELT,
+                self._is_api_stats
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import api_stats handler: {e}")
+
         try:
             from ..ovnk.analyzer_elt_latency import ovnkLatencyELT
             register_metric_handler(
@@ -294,6 +307,36 @@ class GenericELT(utilityELT):
         except ImportError as e:
             logger.warning(f"Could not import ovn_latency handler: {e}")
 
+        try:
+            from ..ovnk.analyzer_elt_ovs import ovsUsageELT
+            register_metric_handler(
+                'ovs_usage',
+                ovsUsageELT,
+                self._is_ovs_usage
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import ovs_usage handler: {e}")
+
+        try:
+            from ..ovnk.analyzer_elt_kubelet_cni import kubeletCNIELT
+            register_metric_handler(
+                'kubelet_cni',
+                kubeletCNIELT,
+                self._is_kubelet_cni
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import kubelet_cni handler: {e}")            
+
+        try:
+            from ..ocp.analyzer_elt_cluster_alert import clusterAlertELT
+            register_metric_handler(
+                'cluster_alert',
+                clusterAlertELT,
+                self._is_cluster_alert
+            )
+        except ImportError as e:
+            logger.warning(f"Could not import cluster_alert handler: {e}")
+
     # ============================================================================
     # DATA TYPE IDENTIFICATION
     # ============================================================================
@@ -303,9 +346,11 @@ class GenericELT(utilityELT):
         # Try registered handlers first
         metric_type = self.registry.identify_metric_type(data)
         if metric_type:
+            logger.debug(f"Identified data type as: {metric_type}")
             return metric_type
         
         # Fallback to generic
+        logger.debug(f"Could not identify data type, falling back to generic. Top-level keys: {list(data.keys())[:10]}")
         return 'generic'
     
     @staticmethod
@@ -675,28 +720,157 @@ class GenericELT(utilityELT):
     @staticmethod
     def _is_ovn_latency(data: Dict[str, Any]) -> bool:
         """Identify OVN latency data"""
+        # Exclude api_server category - it should be handled by api_stats
+        if 'category' in data and data.get('category') == 'api_server':
+            return False
+        
         if 'category' in data and data.get('category') == 'latency':
             return True
         
         # Check nested structure
         if 'data' in data and isinstance(data.get('data'), dict):
             inner = data['data']
+            # Exclude api_server category
+            if 'category' in inner and inner.get('category') == 'api_server':
+                return False
             if 'category' in inner and inner.get('category') == 'latency':
                 return True
-            # Check for metrics with latency-specific names
+            # Check for metrics with latency-specific names (but not API server metrics)
             metrics = inner.get('metrics', {})
             if isinstance(metrics, dict):
-                if any('latency' in k or 'duration' in k for k in metrics.keys()):
+                # Check for OVN-specific latency metrics (cni_request, ovn, etc.)
+                if any('cni_request' in k or 'ovn' in k.lower() or 
+                       ('latency' in k and 'api' not in k.lower()) for k in metrics.keys()):
                     return True
         
         # Direct metrics check
         if 'metrics' in data and isinstance(data.get('metrics'), dict):
-            if any('latency' in k or 'duration' in k or 'cni_request' in k 
+            # Check for OVN-specific latency metrics
+            if any('cni_request' in k or 'ovn' in k.lower() or 
+                   ('latency' in k and 'api' not in k.lower()) for k in data['metrics'].keys()):
+                return True
+        
+        return False
+
+    @staticmethod
+    def _is_ovs_usage(data: Dict[str, Any]) -> bool:
+        """Identify OVS usage data"""
+        # Check top-level category (both 'ovs' and 'ovs_metrics')
+        if 'category' in data:
+            category = data.get('category')
+            if category in ['ovs', 'ovs_metrics']:
+                return True
+        
+        # Check nested structure
+        if 'data' in data and isinstance(data.get('data'), dict):
+            inner = data['data']
+            if 'category' in inner:
+                inner_category = inner.get('category')
+                if inner_category in ['ovs', 'ovs_metrics']:
+                    return True
+            # Check for metrics with OVS indicators
+            metrics = inner.get('metrics', {})
+            if isinstance(metrics, dict):
+                if any('ovs' in k.lower() or 'ovsdb' in k.lower() 
+                    for k in metrics.keys()):
+                    return True
+        
+        # Direct metrics check
+        if 'metrics' in data and isinstance(data.get('metrics'), dict):
+            if any('ovs' in k.lower() or 'ovsdb' in k.lower() 
                 for k in data['metrics'].keys()):
                 return True
         
         return False
 
+    @staticmethod
+    def _is_kubelet_cni(data: Dict[str, Any]) -> bool:
+        """Identify kubelet CNI data"""
+        if 'category' in data and data.get('category') == 'cni':
+            return True
+        
+        # Check nested structure
+        if 'data' in data and isinstance(data.get('data'), dict):
+            inner = data['data']
+            if 'category' in inner and inner.get('category') == 'cni':
+                return True
+            # Check for metrics with CNI indicators
+            metrics = inner.get('metrics', {})
+            if isinstance(metrics, dict):
+                if any(k.startswith('cni_') or k.startswith('crio_') or 'container_threads' in k 
+                    for k in metrics.keys()):
+                    return True
+        
+        # Direct metrics check
+        if 'metrics' in data and isinstance(data.get('metrics'), dict):
+            if any(k.startswith('cni_') or k.startswith('crio_') or 'container_threads' in k 
+                for k in data['metrics'].keys()):
+                return True
+        
+        return False
+
+    @staticmethod
+    def _is_api_stats(data: Dict[str, Any]) -> bool:
+        """Identify API server stats data"""
+        # Check category first (most specific identifier)
+        if 'category' in data and data.get('category') == 'api_server':
+            return True
+        
+        # Check nested structure
+        if 'data' in data and isinstance(data.get('data'), dict):
+            inner = data['data']
+            # Check category first - this is the most reliable identifier
+            if 'category' in inner and inner.get('category') == 'api_server':
+                return True
+            # Check for cluster_summary which is unique to API stats
+            if 'cluster_summary' in inner and isinstance(inner.get('cluster_summary'), dict):
+                cluster_summary = inner['cluster_summary']
+                if 'performance_indicators' in cluster_summary:
+                    return True
+            # Check for metrics with api server indicators
+            metrics = inner.get('metrics', {})
+            if isinstance(metrics, dict):
+                if any('apicalls' in k or 'api_request' in k or 'api_server' in k 
+                    for k in metrics.keys()):
+                    return True
+        
+        # Check for cluster_summary at top level (unique to API stats)
+        if 'cluster_summary' in data and isinstance(data.get('cluster_summary'), dict):
+            cluster_summary = data['cluster_summary']
+            if 'performance_indicators' in cluster_summary:
+                return True
+        
+        # Direct metrics check (less reliable, but fallback)
+        if 'metrics' in data and isinstance(data.get('metrics'), dict):
+            if any('apicalls' in k or 'api_request' in k or 'api_server' in k 
+                for k in data['metrics'].keys()):
+                return True
+        
+        return False
+
+    @staticmethod
+    def _is_cluster_alert(data: Dict[str, Any]) -> bool:
+        """Identify cluster alert data"""
+        if 'category' in data and data.get('category') == 'alerts':
+            return True
+        
+        # Check nested structure
+        if 'data' in data and isinstance(data.get('data'), dict):
+            inner = data['data']
+            if 'category' in inner and inner.get('category') == 'alerts':
+                return True
+            # Check for metrics with alert indicators
+            metrics = inner.get('metrics', {})
+            if isinstance(metrics, dict):
+                if 'top_alerts' in metrics:
+                    return True
+        
+        # Direct metrics check
+        if 'metrics' in data and isinstance(data.get('metrics'), dict):
+            if 'top_alerts' in data['metrics']:
+                return True
+        
+        return False
 
     # ============================================================================
     # MAIN PROCESSING PIPELINE
@@ -720,14 +894,17 @@ class GenericELT(utilityELT):
             
             # Identify data type
             data_type = self.identify_data_type(data)
+            logger.debug(f"Data type identified: {data_type}")
             
             # Get appropriate handler
             handler = self.registry.get_handler(data_type)
             
             if handler is None:
+                logger.warning(f"No handler found for data_type: {data_type}. Available handlers: {self.registry.list_registered_types()}")
                 # No specific handler, use generic processing
                 return self._process_generic(data, data_type)
             
+            logger.debug(f"Using handler: {type(handler).__name__} for data_type: {data_type}")
             # Delegate to specialized handler
             return self._process_with_handler(data, data_type, handler)
             
@@ -740,6 +917,7 @@ class GenericELT(utilityELT):
         try:
             # Extract nested data if needed
             actual_data = self._extract_actual_data(data, data_type)
+            logger.debug(f"Extracted actual_data for {data_type}. Keys: {list(actual_data.keys())[:10]}")
             
             # Use handler's methods with appropriate method names
             if data_type == 'cluster_info':
@@ -798,7 +976,19 @@ class GenericELT(utilityELT):
                 summary_method = 'summarize_general_info'
             elif data_type == 'ovn_latency':
                 structured_data = handler.extract_ovn_latency(actual_data) if hasattr(handler, 'extract_ovn_latency') else {}
-                summary_method = 'summarize_ovn_latency'                                                         
+                summary_method = 'summarize_ovn_latency'
+            elif data_type == 'ovs_usage':
+                structured_data = handler.extract_ovs_usage(actual_data) if hasattr(handler, 'extract_ovs_usage') else {}
+                summary_method = 'summarize_ovs_usage'
+            elif data_type == 'kubelet_cni':
+                structured_data = handler.extract_kubelet_cni(actual_data) if hasattr(handler, 'extract_kubelet_cni') else {}
+                summary_method = 'summarize_kubelet_cni'
+            elif data_type == 'api_stats':
+                structured_data = handler.extract_api_stats(actual_data) if hasattr(handler, 'extract_api_stats') else {}
+                summary_method = 'summarize_api_stats'
+            elif data_type == 'cluster_alert':
+                structured_data = handler.extract_cluster_alert(actual_data) if hasattr(handler, 'extract_cluster_alert') else {}
+                summary_method = 'summarize_cluster_alert'
             else:
                 # Generic fallback
                 structured_data = handler.extract_cluster_info(actual_data) if hasattr(handler, 'extract_cluster_info') else {}
@@ -946,14 +1136,38 @@ class GenericELT(utilityELT):
                 return data['data']
             if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
                 return data['result']['data']
-        
-        return data  
 
         if data_type == 'ovn_latency':
             if 'data' in data and isinstance(data.get('data'), dict):
                 return data['data']
             if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
                 return data['result']['data']
+
+        if data_type == 'ovs_usage':
+            if 'data' in data and isinstance(data.get('data'), dict):
+                return data['data']
+            if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
+                return data['result']['data']
+
+        if data_type == 'kubelet_cni':
+            if 'data' in data and isinstance(data.get('data'), dict):
+                return data['data']
+            if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
+                return data['result']['data']                
+
+        if data_type == 'api_stats':
+            if 'data' in data and isinstance(data.get('data'), dict):
+                return data['data']
+            if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
+                return data['result']['data']
+
+        if data_type == 'cluster_alert':
+            if 'data' in data and isinstance(data.get('data'), dict):
+                return data['data']
+            if 'result' in data and isinstance(data.get('result'), dict) and 'data' in data['result']:
+                return data['result']['data']
+        
+        return data
 
 
     def _process_generic(self, data: Dict[str, Any], data_type: str) -> Dict[str, Any]:

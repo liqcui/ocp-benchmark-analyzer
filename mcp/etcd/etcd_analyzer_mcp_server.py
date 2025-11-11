@@ -1082,7 +1082,7 @@ async def get_etcd_performance_deep_drive(
         
         # Lazy import of analysis module
         try:
-            from analysis.etcd.performance_analysis_deepdrive import etcdDeepDriveAnalyzer
+            from analysis.etcd.performance_deepdrive import etcdDeepDriveAnalyzer
         except ImportError as import_err:
             logger.error(f"Failed to import etcdDeepDriveAnalyzer: {import_err}")
             return ETCDPerformanceDeepDriveResponse(
@@ -1180,7 +1180,7 @@ async def get_etcd_bottleneck_analysis(duration: str = "1h") -> ETCDBottleneckAn
         
         # Lazy import of analysis module
         try:
-            from analysis.etcd.performance_analysis_deepdrive import etcdDeepDriveAnalyzer
+            from analysis.etcd.performance_deepdrive import etcdDeepDriveAnalyzer
         except ImportError as import_err:
             logger.error(f"Failed to import etcdDeepDriveAnalyzer: {import_err}")
             return ETCDBottleneckAnalysisResponse(
@@ -1282,8 +1282,8 @@ async def generate_etcd_performance_report(duration: str = "1h", input: Performa
         
         # Lazy import of analysis modules
         try:
-            from analysis.etcd.performance_analysis_deepdrive import etcdDeepDriveAnalyzer
-            from analysis.etcd.performance_analysis_report import etcdReportAnalyzer
+            from analysis.etcd.performance_deepdrive import etcdDeepDriveAnalyzer
+            from analysis.etcd.performance_report import etcdReportAnalyzer
         except ImportError as import_err:
             logger.error(f"Failed to import performance report modules: {import_err}")
             return ETCDPerformanceReportResponse(

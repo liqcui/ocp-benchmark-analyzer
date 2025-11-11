@@ -29,7 +29,7 @@ from mcp.client.session import ClientSession
 # Import analysis modules
 # Ensure project root is on sys.path for module imports when run as a script
 try:
-    from analysis.etcd.performance_analysis_report import etcdReportAnalyzer
+    from analysis.etcd.performance_report import etcdReportAnalyzer
     from analysis.utils.analysis_utility import etcdAnalyzerUtility
 except ModuleNotFoundError:
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -38,7 +38,7 @@ except ModuleNotFoundError:
     # If another installed package named 'analysis' was imported earlier, remove it to prefer local package
     if 'analysis' in sys.modules:
         del sys.modules['analysis']
-    from analysis.etcd.performance_analysis_report import etcdReportAnalyzer
+    from analysis.etcd.performance_report import etcdReportAnalyzer
     from analysis.utils.analysis_utility import etcdAnalyzerUtility
 
 logging.basicConfig(

@@ -5,6 +5,7 @@ Comprehensive performance analysis module for etcd clusters
 
 import asyncio
 import logging
+import os
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 import pytz
@@ -13,11 +14,12 @@ import pytz
 from tools.etcd.etcd_general_info import GeneralInfoCollector
 from tools.etcd.etcd_disk_wal_fsync import DiskWALFsyncCollector
 from tools.disk.disk_io import DiskIOCollector
-from tools.etcd.etcd_network_io import NetworkIOCollector
+from tools.net.network_io import NetworkIOCollector
 from tools.etcd.etcd_disk_backend_commit import DiskBackendCommitCollector
 from tools.etcd.etcd_disk_compact_defrag import CompactDefragCollector
 from analysis.utils.analysis_utility import etcdAnalyzerUtility
 from tools.node.node_usage import nodeUsageCollector
+from config.metrics_config_reader import Config
 
 class etcdDeepDriveAnalyzer:
     """Deep drive analyzer for etcd cluster performance"""
@@ -32,7 +34,31 @@ class etcdDeepDriveAnalyzer:
         self.general_collector = GeneralInfoCollector(ocp_auth)
         self.wal_fsync_collector = DiskWALFsyncCollector(ocp_auth, duration)
         self.disk_io_collector = DiskIOCollector(ocp_auth, duration)
-        self.network_collector = NetworkIOCollector(ocp_auth)
+        
+        # Initialize NetworkIOCollector with proper parameters
+        # Extract prometheus_url and token from ocp_auth
+        prometheus_url = getattr(ocp_auth, 'prometheus_url', None)
+        if not prometheus_url:
+            prometheus_url = getattr(ocp_auth, 'prom_url', None)
+        prometheus_token = getattr(ocp_auth, 'prometheus_token', None)
+        if not prometheus_token:
+            prometheus_token = getattr(ocp_auth, 'token', None) or getattr(ocp_auth, 'bearer_token', None)
+        
+        # Load network metrics config
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(os.path.dirname(current_dir))
+        metrics_net_file = os.path.join(project_root, 'config', 'metrics-net.yml')
+        network_config = Config()
+        load_result = network_config.load_metrics_file(metrics_net_file)
+        if not load_result.get('success'):
+            self.logger.warning(f"Failed to load network metrics file: {load_result.get('error', 'Unknown error')}")
+        
+        self.network_collector = NetworkIOCollector(
+            prometheus_url=prometheus_url,
+            token=prometheus_token,
+            config=network_config
+        )
+        
         self.backend_commit_collector = DiskBackendCommitCollector(ocp_auth)
         self.compact_defrag_collector = CompactDefragCollector(ocp_auth, duration)
         
@@ -216,77 +242,113 @@ class etcdDeepDriveAnalyzer:
     async def _collect_network_io_metrics(self) -> Dict[str, Any]:
         network_data = {"pod_metrics": [], "node_metrics": [], "cluster_metrics": []}
         try:
-            result = await self.network_collector.collect_metrics(self.duration)
-            if result.get('status') == 'success':
-                data = result.get('data', {})
-                pod_target_metrics = [
-                    'network_io_container_network_rx',
-                    'network_io_container_network_tx',
-                    'network_io_peer2peer_latency_p99',
-                    'network_io_network_peer_received_bytes',
-                    'network_io_network_peer_sent_bytes',
-                    'network_io_network_client_grpc_received_bytes',
-                    'network_io_network_client_grpc_sent_bytes'
-                ]
-                pods_metrics = data.get('pods_metrics', data.get('container_metrics', {}))
-                for metric_name in pod_target_metrics:
-                    if metric_name in pods_metrics:
-                        metric_data = pods_metrics[metric_name]
-                        if metric_data.get('status') == 'success':
-                            pods_data = metric_data.get('pods', {})
-                            unit = metric_data.get('unit', 'unknown')
-                            for pod_name, pod_stats in pods_data.items():
-                                network_data["pod_metrics"].append({
-                                    "metric_name": metric_name,
-                                    "pod_name": pod_name,
-                                    "avg": pod_stats.get('avg'),
-                                    "max": pod_stats.get('max'),
-                                    "unit": unit
-                                })
-                node_target_metrics = [
-                    'network_io_node_network_rx_utilization',
-                    'network_io_node_network_tx_utilization',
-                    'network_io_node_network_rx_package',
-                    'network_io_node_network_tx_package',
-                    'network_io_node_network_rx_drop',
-                    'network_io_node_network_tx_drop'
-                ]
-                node_metrics = data.get('node_metrics', {})
-                for metric_name in node_target_metrics:
-                    if metric_name in node_metrics:
-                        metric_data = node_metrics[metric_name]
-                        if metric_data.get('status') == 'success':
-                            nodes_data = metric_data.get('nodes', {})
-                            unit = metric_data.get('unit', 'unknown')
-                            query = metric_data.get('query', 'N/A')
-                            for node_name, node_stats in nodes_data.items():
-                                network_data["node_metrics"].append({
-                                    "metric_name": metric_name,
-                                    "node_name": node_name,
-                                    "avg": node_stats.get('avg'),
-                                    "max": node_stats.get('max'),
-                                    "unit": unit,
-                                    "query": query
-                                })
-                cluster_target_metrics = [
-                    'network_io_grpc_active_watch_streams',
-                    'network_io_grpc_active_lease_streams'
-                ]
-                cluster_metrics = data.get('cluster_metrics', {})
-                for metric_name in cluster_target_metrics:
-                    if metric_name in cluster_metrics:
-                        metric_data = cluster_metrics[metric_name]
-                        if metric_data.get('status') == 'success':
-                            network_data["cluster_metrics"].append({
+            # Ensure network collector is initialized
+            await self.network_collector.initialize()
+            result = await self.network_collector.collect_all_metrics(self.duration)
+            
+            # collect_all_metrics returns: {category, duration, timestamp, metrics: {metric_name: metric_result}, summary}
+            # metric_result structure: {metric, unit, controlplane: {nodes: []}, worker: {top3: []}, infra: {nodes: []}, workload: {nodes: []}}
+            
+            metrics = result.get('metrics', {})
+            
+            # Process node-level metrics
+            node_target_metrics = [
+                'network_io_node_network_rx_utilization',
+                'network_io_node_network_tx_utilization',
+                'network_io_node_network_rx_package',
+                'network_io_node_network_tx_package',
+                'network_io_node_network_rx_drop',
+                'network_io_node_network_tx_drop'
+            ]
+            
+            for metric_name in node_target_metrics:
+                # The metric_name in metrics dict is the method name, e.g., 'network_io_node_network_rx_utilization'
+                metric_result = metrics.get(metric_name)
+                if not metric_result or isinstance(metric_result, dict) and 'error' in metric_result:
+                    continue
+                
+                if isinstance(metric_result, dict):
+                    unit = metric_result.get('unit', 'unknown')
+                    
+                    # Extract nodes from controlplane, infra, and workload
+                    for role in ['controlplane', 'infra', 'workload']:
+                        role_data = metric_result.get(role, {})
+                        nodes = role_data.get('nodes', [])
+                        for node_info in nodes:
+                            node_name = node_info.get('node')
+                            network_data["node_metrics"].append({
                                 "metric_name": metric_name,
-                                "test_id": self.test_id,
-                                "avg": metric_data.get('avg'),
-                                "max": metric_data.get('max'),
-                                "unit": metric_data.get('unit', 'unknown'),
-                                "query": metric_data.get('query', 'N/A')
+                                "node_name": node_name,
+                                "avg": node_info.get('avg'),
+                                "max": node_info.get('max'),
+                                "unit": unit
                             })
+                    
+                    # Extract top 3 worker nodes
+                    worker_data = metric_result.get('worker', {})
+                    top3_workers = worker_data.get('top3', [])
+                    for node_info in top3_workers:
+                        node_name = node_info.get('node')
+                        network_data["node_metrics"].append({
+                            "metric_name": metric_name,
+                            "node_name": node_name,
+                            "avg": node_info.get('avg'),
+                            "max": node_info.get('max'),
+                            "unit": unit
+                        })
+            
+            # Process cluster-level metrics
+            cluster_target_metrics = [
+                'network_io_grpc_active_watch_streams'
+            ]
+            
+            for metric_name in cluster_target_metrics:
+                metric_result = metrics.get(metric_name)
+                if not metric_result or isinstance(metric_result, dict) and 'error' in metric_result:
+                    continue
+                
+                if isinstance(metric_result, dict):
+                    unit = metric_result.get('unit', 'unknown')
+                    # For cluster metrics, aggregate across all nodes
+                    all_values = []
+                    for role in ['controlplane', 'infra', 'workload']:
+                        role_data = metric_result.get(role, {})
+                        nodes = role_data.get('nodes', [])
+                        for node_info in nodes:
+                            if node_info.get('avg') is not None:
+                                all_values.append(node_info.get('avg'))
+                            if node_info.get('max') is not None:
+                                all_values.append(node_info.get('max'))
+                    
+                    worker_data = metric_result.get('worker', {})
+                    top3_workers = worker_data.get('top3', [])
+                    for node_info in top3_workers:
+                        if node_info.get('avg') is not None:
+                            all_values.append(node_info.get('avg'))
+                        if node_info.get('max') is not None:
+                            all_values.append(node_info.get('max'))
+                    
+                    if all_values:
+                        network_data["cluster_metrics"].append({
+                            "metric_name": metric_name,
+                            "test_id": self.test_id,
+                            "avg": sum(all_values) / len(all_values) if all_values else None,
+                            "max": max(all_values) if all_values else None,
+                            "unit": unit
+                        })
+            
+            # Note: Pod-level metrics (container_network_rx, peer2peer_latency, etc.) are not available
+            # in the current NetworkIOCollector implementation which focuses on node-level metrics
+            # These are left as empty arrays for now
+            
         except Exception as e:
             self.logger.error(f"Error in _collect_network_io_metrics: {e}")
+        finally:
+            # Ensure network collector session is closed
+            try:
+                await self.network_collector.close()
+            except Exception as close_err:
+                self.logger.debug(f"Error closing network collector: {close_err}")
         return network_data
     
     async def _collect_backend_commit_metrics(self) -> List[Dict[str, Any]]:
@@ -357,7 +419,7 @@ class etcdDeepDriveAnalyzer:
         """Collect node usage metrics for master nodes"""
         try:
             self.logger.info("Collecting node usage metrics")
-            result = await self.node_usage_collector.collect_all_metrics(self.duration)
+            result = await self.node_usage_collector.collect_all_metrics(node_group='master', duration=self.duration)
             if result.get('status') == 'success':
                 self.logger.info(
                     f"Successfully collected node usage metrics for {result.get('total_nodes', 0)} nodes"
@@ -416,6 +478,12 @@ class etcdDeepDriveAnalyzer:
                 "status": "error",
                 "error": str(e)
             }
+        finally:
+            # Ensure network collector session is closed after bottleneck analysis
+            try:
+                await self.network_collector.close()
+            except Exception as close_err:
+                self.logger.debug(f"Error closing network collector after bottleneck analysis: {close_err}")
     
     async def _analyze_disk_bottlenecks(self, data: Dict[str, Any], analysis: Dict[str, Any]):
         try:
@@ -560,12 +628,21 @@ class etcdDeepDriveAnalyzer:
         try:
             bandwidth_query = f'node_network_speed_bytes{{instance=~".*{node_name}.*"}}'
             try:
-                result = await self.network_collector._query_prometheus(bandwidth_query)
-                if result and len(result) > 0:
-                    max_bandwidth = max([float(item['value'][1]) for item in result])
+                # Ensure session is available (reinitialize if needed)
+                if not hasattr(self.network_collector.prometheus_client, 'session') or \
+                   self.network_collector.prometheus_client.session is None or \
+                   self.network_collector.prometheus_client.session.closed:
+                    await self.network_collector.initialize()
+                
+                # Use prometheus_client directly to query
+                result = await self.network_collector.prometheus_client.query_instant(bandwidth_query)
+                if result and result.get('result') and len(result['result']) > 0:
+                    max_bandwidth = max([float(item['value'][1]) for item in result['result']])
                     return max_bandwidth
-            except:
+            except Exception as query_err:
+                self.logger.debug(f"Could not query NIC bandwidth for {node_name}: {query_err}")
                 pass
+            # Fallback to default values based on node type
             if 'master' in node_name.lower() or 'control' in node_name.lower():
                 return 10 * 1024 * 1024 * 1024 / 8
             elif 'worker' in node_name.lower():

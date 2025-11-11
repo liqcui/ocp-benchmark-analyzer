@@ -468,32 +468,86 @@ class etcdAnalyzerUtility:
                 if isinstance(data, list):
                     summary['categories'][key]['count'] = len(data)
                     summary['total_metrics_collected'] += len(data)
-                elif isinstance(data, dict) and 'pod_metrics' in data:
-                    count = len(data['pod_metrics'])
-                    summary['categories'][key]['count'] = count
-                    summary['total_metrics_collected'] += count
-                elif isinstance(data, dict) and 'metrics' in data:
-                    # Node usage data structure
-                    count = len(data.get('metrics', {}))
-                    summary['categories']['node_usage']['count'] = count
-                    summary['total_metrics_collected'] += count
+                elif isinstance(data, dict):
+                    if 'pod_metrics' in data:
+                        # Network data structure with pod_metrics, node_metrics, cluster_metrics
+                        count = len(data.get('pod_metrics', [])) + len(data.get('node_metrics', [])) + len(data.get('cluster_metrics', []))
+                        summary['categories'][key]['count'] = count
+                        summary['total_metrics_collected'] += count
+                    elif 'metrics' in data:
+                        # Node usage data structure
+                        count = len(data.get('metrics', {}))
+                        summary['categories']['node_usage']['count'] = count
+                        summary['total_metrics_collected'] += count
+                    elif 'status' in data:
+                        # Data structure with status (like node_usage_data)
+                        if data.get('status') == 'success' and 'metrics' in data:
+                            count = len(data.get('metrics', {}))
+                            summary['categories']['node_usage']['count'] = count
+                            summary['total_metrics_collected'] += count
             
-            # Assess overall health based on latency analysis
+            # Map latency analysis to categories and determine status
+            category_status_map = {
+                'wal_fsync_p99': 'wal_fsync',
+                'backend_commit_p99': 'backend_commit',
+                'disk_io': 'disk_io',
+                'network': 'network_io',
+                'general_info': 'general_info',
+                'compact_defrag': 'compact_defrag',
+                'node_usage': 'node_usage'
+            }
+            
+            # Assess category status based on latency analysis
             if 'latency_analysis' in all_metrics:
                 latency_data = all_metrics['latency_analysis']
                 health_scores = []
+                category_scores = {}
                 
+                # Process latency analysis results
                 for metric, analysis in latency_data.get('latency_analysis', {}).items():
                     status = analysis.get('status', 'unknown')
                     if status == 'excellent':
-                        health_scores.append(4)
+                        score = 4
                     elif status == 'good':
-                        health_scores.append(3)
+                        score = 3
                     elif status == 'warning':
-                        health_scores.append(2)
+                        score = 2
                     elif status == 'critical':
-                        health_scores.append(1)
+                        score = 1
+                    else:
+                        score = 0
+                    
+                    health_scores.append(score)
+                    
+                    # Map metric to category
+                    for metric_key, category_key in category_status_map.items():
+                        if metric_key in metric.lower():
+                            if category_key not in category_scores:
+                                category_scores[category_key] = []
+                            category_scores[category_key].append(score)
+                            break
                 
+                # Set status for each category
+                for category_key in summary['categories']:
+                    if category_key in category_scores and category_scores[category_key]:
+                        # Use average score for category
+                        avg_category_score = sum(category_scores[category_key]) / len(category_scores[category_key])
+                        if avg_category_score >= 3.5:
+                            summary['categories'][category_key]['status'] = 'excellent'
+                        elif avg_category_score >= 2.5:
+                            summary['categories'][category_key]['status'] = 'good'
+                        elif avg_category_score >= 1.5:
+                            summary['categories'][category_key]['status'] = 'warning'
+                        elif avg_category_score >= 0.5:
+                            summary['categories'][category_key]['status'] = 'critical'
+                    elif summary['categories'][category_key]['count'] > 0:
+                        # If metrics collected but no latency analysis, default to 'good'
+                        summary['categories'][category_key]['status'] = 'good'
+                    else:
+                        # No metrics collected
+                        summary['categories'][category_key]['status'] = 'unknown'
+                
+                # Assess overall health
                 if health_scores:
                     avg_score = sum(health_scores) / len(health_scores)
                     if avg_score >= 3.5:
@@ -504,6 +558,19 @@ class etcdAnalyzerUtility:
                         summary['overall_health'] = 'warning'
                     else:
                         summary['overall_health'] = 'critical'
+            else:
+                # No latency analysis available, set status based on whether metrics were collected
+                for category_key in summary['categories']:
+                    if summary['categories'][category_key]['count'] > 0:
+                        summary['categories'][category_key]['status'] = 'good'
+                    else:
+                        summary['categories'][category_key]['status'] = 'unknown'
+                
+                # Set overall health based on whether any metrics were collected
+                if summary['total_metrics_collected'] > 0:
+                    summary['overall_health'] = 'good'
+                else:
+                    summary['overall_health'] = 'unknown'
         
         except Exception as e:
             self.logger.error(f"Error creating performance summary: {e}")

@@ -16,6 +16,12 @@ import ssl
 # Suppress urllib3 SSL warnings for self-signed certificates
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+# Suppress urllib3 connection pool retry warnings (these are expected during transient network issues)
+urllib3.disable_warnings(urllib3.exceptions.MaxRetryError)
+# Suppress connection reset warnings from urllib3 connection pool
+# These warnings occur when urllib3 automatically retries after connection resets, which is expected behavior
+urllib3_logger = logging.getLogger('urllib3.connectionpool')
+urllib3_logger.setLevel(logging.ERROR)  # Only show errors, not warnings about retries
 import requests
 
 
