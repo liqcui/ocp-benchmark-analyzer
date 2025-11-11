@@ -214,7 +214,7 @@ class networkSocketTCPELT(utilityELT):
                 structured[table_key].append({
                     'Metric': title,
                     'Role': role.title(),
-                    'Node': self.truncate_node_name(node_name),
+                    'Node': node_name,
                     'Avg Usage': avg_display,
                     'Max Usage': max_display,
                     'Unit': unit
